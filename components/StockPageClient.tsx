@@ -205,7 +205,7 @@ export default function StockPageClient() {
     setAdjustingProduct(product);
     setAdjustmentType("add");
     setAdjustQty("");
-    setAdjustBufferQty(product.bufferStock);
+    setAdjustBufferQty("");
   };
 
   // Save Stock Adjustment to Firestore
@@ -790,6 +790,7 @@ export default function StockPageClient() {
                   required
                   placeholder={adjustmentType === "add" ? "e.g. 25" : "e.g. 50"}
                   value={adjustQty}
+                  onWheel={(e) => (e.target as HTMLElement).blur()}
                   onChange={(e) => setAdjustQty(e.target.value === "" ? "" : Number(e.target.value))}
                   className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white font-mono"
                 />
@@ -805,6 +806,7 @@ export default function StockPageClient() {
                   min="0"
                   placeholder="e.g. 10"
                   value={adjustBufferQty}
+                  onWheel={(e) => (e.target as HTMLElement).blur()}
                   onChange={(e) => setAdjustBufferQty(e.target.value === "" ? "" : Number(e.target.value))}
                   className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white font-mono"
                 />

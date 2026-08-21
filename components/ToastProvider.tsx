@@ -25,6 +25,23 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // Prevent mouse wheel from changing input[type=number] values globally
+  React.useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        target.tagName === "INPUT" &&
+        (target as HTMLInputElement).type === "number" &&
+        document.activeElement === target
+      ) {
+        target.blur();
+      }
+    };
+    window.addEventListener("wheel", handleWheel, { passive: true });
+    return () => window.removeEventListener("wheel", handleWheel);
+  }, []);
+
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);

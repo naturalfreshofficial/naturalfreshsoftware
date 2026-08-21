@@ -85,7 +85,7 @@ export default function SuppliersPageClient() {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [orderItems, setOrderItems] = useState<
-    { productId: string; name: string; quantity: number }[]
+    { productId: string; name: string; quantity: number | "" }[]
   >([]);
   const [orderStatus, setOrderStatus] = useState<"pending" | "received">("pending");
   const [orderNotes, setOrderNotes] = useState("");
@@ -202,12 +202,12 @@ export default function SuppliersPageClient() {
     }
 
     setSelectedSupplierId(presetSupplierId || suppliers[0]?.id || "");
-    // Start with 1 empty item row with NO pre-selected item
+    // Start with 1 empty item row with NO pre-selected item and empty quantity
     setOrderItems([
       {
         productId: "",
         name: "",
-        quantity: 1,
+        quantity: "",
       },
     ]);
     setOrderStatus("pending");
@@ -215,12 +215,12 @@ export default function SuppliersPageClient() {
     setIsOrderModalOpen(true);
   };
 
-  // Add Item Row in Order Modal (prepends new items to the top)
+  // Add Item Row in Order Modal (prepends new items to the top with empty quantity)
   const addOrderItemRow = (count: number = 1) => {
     const newRows = Array.from({ length: count }, () => ({
       productId: "",
       name: "",
-      quantity: 1,
+      quantity: "" as const,
     }));
     setOrderItems((prev) => [...newRows, ...prev]);
   };
@@ -249,7 +249,10 @@ export default function SuppliersPageClient() {
           };
         }
       } else if (field === "quantity") {
-        next[index] = { ...next[index], quantity: Math.max(1, Number(val) || 1) };
+        next[index] = {
+          ...next[index],
+          quantity: val === "" ? "" : Math.max(1, Number(val) || 1),
+        };
       }
       return next;
     });
@@ -268,7 +271,9 @@ export default function SuppliersPageClient() {
       return;
     }
 
-    const validItems = orderItems.filter((it) => it.productId && it.quantity > 0);
+    const validItems = orderItems.filter(
+      (it) => it.productId && Number(it.quantity) > 0
+    );
     if (validItems.length === 0) {
       toast.warning("Please select at least one product item with quantity");
       return;
@@ -289,12 +294,15 @@ export default function SuppliersPageClient() {
       const randomSuffix = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `PO-${dateStr}-${randomSuffix}`;
 
-      const totalQuantity = validItems.reduce((acc, it) => acc + it.quantity, 0);
+      const totalQuantity = validItems.reduce(
+        (acc, it) => acc + (Number(it.quantity) || 0),
+        0
+      );
 
       const formattedItems: SupplierOrderItem[] = validItems.map((it) => ({
         productId: it.productId,
         name: it.name,
-        quantity: it.quantity,
+        quantity: Number(it.quantity) || 1,
       }));
 
       const orderData = {
@@ -326,7 +334,7 @@ export default function SuppliersPageClient() {
           if (it.productId) {
             const prodRef = doc(db, "products", it.productId);
             batch.update(prodRef, {
-              stock: increment(it.quantity),
+              stock: increment(Number(it.quantity) || 1),
             });
           }
         });
@@ -1161,7 +1169,7 @@ export default function SuppliersPageClient() {
                     <h2 className="text-lg font-bold text-slate-900">Create Supplier Purchase Order</h2>
                     <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold font-mono">
                       {orderItems.filter((it) => it.productId).length} items •{" "}
-                      {orderItems.reduce((acc, it) => acc + (it.productId ? it.quantity : 0), 0)} units
+                      {orderItems.reduce((acc, it) => acc + (it.productId ? (Number(it.quantity) || 0) : 0), 0)} units
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">
@@ -1281,7 +1289,11 @@ export default function SuppliersPageClient() {
                                     <button
                                       type="button"
                                       onClick={() =>
-                                        updateOrderItemRow(idx, "quantity", Math.max(1, item.quantity - 1))
+                                        updateOrderItemRow(
+                                          idx,
+                                          "quantity",
+                                          Math.max(1, (Number(item.quantity) || 1) - 1)
+                                        )
                                       }
                                       className="h-[34px] w-[32px] flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
                                     >
@@ -1291,13 +1303,21 @@ export default function SuppliersPageClient() {
                                       type="number"
                                       min="1"
                                       required
+                                      placeholder="Qty"
                                       value={item.quantity}
+                                      onWheel={(e) => (e.target as HTMLElement).blur()}
                                       onChange={(e) => updateOrderItemRow(idx, "quantity", e.target.value)}
                                       className="w-20 h-[34px] text-center font-mono font-extrabold text-slate-900 bg-white border-x border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
                                     />
                                     <button
                                       type="button"
-                                      onClick={() => updateOrderItemRow(idx, "quantity", item.quantity + 1)}
+                                      onClick={() =>
+                                        updateOrderItemRow(
+                                          idx,
+                                          "quantity",
+                                          (Number(item.quantity) || 0) + 1
+                                        )
+                                      }
                                       className="h-[34px] w-[32px] flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
                                     >
                                       <Plus className="w-3.5 h-3.5" />
@@ -1403,7 +1423,7 @@ export default function SuppliersPageClient() {
                     <div className="flex justify-between items-center text-blue-950 font-extrabold text-sm border-t border-blue-200/60 pt-2">
                       <span>Total Restock Units:</span>
                       <span className="font-mono text-base font-black text-blue-700">
-                        {orderItems.reduce((acc, it) => acc + (it.productId ? it.quantity : 0), 0)} units
+                        {orderItems.reduce((acc, it) => acc + (it.productId ? (Number(it.quantity) || 0) : 0), 0)} units
                       </span>
                     </div>
                   </div>
