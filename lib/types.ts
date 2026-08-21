@@ -41,6 +41,8 @@ export interface Invoice {
   totalPayable: number;
   paymentMethod: "UPI" | "Cash" | "Card";
   status: "completed" | "draft" | "cancelled";
+  branchId?: string;
+  branchName?: string;
   note?: string;
   createdAt?: any;
   updatedAt?: any;

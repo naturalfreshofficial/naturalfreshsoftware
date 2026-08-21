@@ -48,7 +48,9 @@ import {
   SlidersHorizontal,
   CheckCircle2,
   FolderOpen,
+  Store,
 } from "lucide-react";
+import { Branch } from "@/lib/types";
 
 export interface POSProduct {
   id: string;
@@ -70,6 +72,12 @@ export interface POSCartItem {
 
 export default function POSBillingView() {
   const toast = useToast();
+  // Branches state from Firestore
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  // Mapping of `${productId}_${branchId}` -> quantity
+  const [branchStockMap, setBranchStockMap] = useState<Record<string, number>>({});
+
   // Products & Categories dynamic state from Firestore
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [categories, setCategories] = useState<string[]>(["All Categories"]);
@@ -112,7 +120,46 @@ export default function POSBillingView() {
 
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
-  // 1. Subscribe to Products in Firestore
+  // 1. Subscribe to Branches in Firestore
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "branches"), (snapshot) => {
+      const bList: Branch[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.status !== "inactive") {
+          bList.push({ id: docSnap.id, ...d } as Branch);
+        }
+      });
+      bList.sort((a, b) => a.name.localeCompare(b.name));
+      setBranches(bList);
+
+      // Auto select saved or first branch
+      const savedBranch = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch_id") : null;
+      if (savedBranch && bList.some((b) => b.id === savedBranch)) {
+        setSelectedBranchId(savedBranch);
+      } else if (bList.length > 0) {
+        setSelectedBranchId(bList[0].id);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // 2. Subscribe to Branch Stocks in Firestore
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "branch_stocks"), (snapshot) => {
+      const map: Record<string, number> = {};
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.productId && d.branchId) {
+          map[`${d.productId}_${d.branchId}`] = Number(d.quantity) || 0;
+        }
+      });
+      setBranchStockMap(map);
+    });
+    return () => unsub();
+  }, []);
+
+  // 3. Subscribe to Products in Firestore
   useEffect(() => {
     setLoadingProducts(true);
     const unsub = onSnapshot(
@@ -196,6 +243,24 @@ export default function POSBillingView() {
     return () => unsub();
   }, []);
 
+  // Branch helpers
+  const handleBranchChange = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("pos_selected_branch_id", branchId);
+    }
+  };
+
+  const selectedBranch = useMemo(() => {
+    return branches.find((b) => b.id === selectedBranchId) || branches[0] || null;
+  }, [branches, selectedBranchId]);
+
+  const getProductStockForSelectedBranch = (productId: string, fallbackStock: number): number => {
+    if (!selectedBranchId) return fallbackStock;
+    const key = `${productId}_${selectedBranchId}`;
+    return branchStockMap[key] !== undefined ? branchStockMap[key] : 0;
+  };
+
   // Close customer dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -243,10 +308,23 @@ export default function POSBillingView() {
     return map;
   }, [cart]);
 
-  // Cart Actions
+  // Cart Actions with branch stock check
   const addToCart = (product: POSProduct) => {
+    const availableStock = getProductStockForSelectedBranch(product.id, product.stock);
+    const existing = cart.find((item) => item.product.id === product.id);
+    const currentQty = existing ? existing.quantity : 0;
+
+    if (availableStock <= 0) {
+      toast.warning(`"${product.name}" is OUT OF STOCK at ${selectedBranch?.name || "this branch"}.`);
+      return;
+    }
+
+    if (currentQty + 1 > availableStock) {
+      toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
+      return;
+    }
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
@@ -257,6 +335,17 @@ export default function POSBillingView() {
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    const itemInCart = cart.find((item) => item.product.id === productId);
+    if (!itemInCart) return;
+
+    if (delta > 0) {
+      const availableStock = getProductStockForSelectedBranch(productId, itemInCart.product.stock);
+      if (itemInCart.quantity + delta > availableStock) {
+        toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
+        return;
+      }
+    }
+
     setCart((prev) =>
       prev
         .map((item) => {
@@ -504,6 +593,8 @@ export default function POSBillingView() {
 
       const invoiceData = {
         invoiceNumber,
+        branchId: selectedBranch?.id || "",
+        branchName: selectedBranch?.name || "Main Store",
         customer: {
           id: selectedCustomer.id,
           name: selectedCustomer.name,
@@ -539,15 +630,33 @@ export default function POSBillingView() {
         }
       }
 
-      // 3. Atomically decrement stock in Firestore products
+      // 3. Atomically decrement stock in Firestore branch_stocks and products
       try {
         const batch = writeBatch(db);
         cart.forEach((item) => {
           if (item.product.id) {
+            // Decrement total product stock
             const prodRef = doc(db, "products", item.product.id);
             batch.update(prodRef, {
               stock: increment(-item.quantity),
             });
+
+            // Decrement specific branch stock
+            if (selectedBranch?.id) {
+              const branchStockRef = doc(db, "branch_stocks", `${item.product.id}_${selectedBranch.id}`);
+              batch.set(
+                branchStockRef,
+                {
+                  productId: item.product.id,
+                  productName: item.product.name,
+                  branchId: selectedBranch.id,
+                  branchName: selectedBranch.name,
+                  quantity: increment(-item.quantity),
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true }
+              );
+            }
           }
         });
         await batch.commit();
@@ -593,6 +702,34 @@ export default function POSBillingView() {
       {/* LEFT / CENTER: Dynamic Product Catalog Browser */}
       {/* ========================================================================= */}
       <div className="flex-1 flex flex-col min-w-0 bg-white rounded-[6px] border border-slate-200 shadow-xs">
+        {/* Top Outlet / Branch Selector Bar */}
+        <div className="bg-slate-900 text-white px-4 py-2.5 rounded-t-[6px] flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-[6px] bg-blue-600 flex items-center justify-center shrink-0">
+              <Store className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Active Billing Outlet</p>
+              <p className="text-sm font-bold text-white truncate">{selectedBranch?.name || "Main Store"}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs text-slate-300 whitespace-nowrap font-medium">Switch Branch:</span>
+            <select
+              value={selectedBranchId}
+              onChange={(e) => handleBranchChange(e.target.value)}
+              className="h-[34px] px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-56"
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id} className="bg-slate-900 text-white">
+                  📍 {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {/* Category Navigation Tabs */}
         <div className="border-b border-slate-200 px-4 md:px-6 flex items-center gap-4 md:gap-6 overflow-x-auto scrollbar-none h-[48px] bg-slate-50/50">
           {categories.map((cat) => {
@@ -673,7 +810,7 @@ export default function POSBillingView() {
               <p className="text-xs text-slate-400 max-w-sm mt-1">
                 {searchQuery
                   ? "Try changing your search term or select another category."
-                  : "Add products in the Products page or load sample catalog to get started."}
+                  : "Add products in the Products page or allocate stock in Stock Assignment."}
               </p>
             </div>
           ) : viewMode === "grid" ? (
@@ -681,12 +818,18 @@ export default function POSBillingView() {
               {filteredProducts.map((product) => {
                 const inCartQty = cartQuantities.get(product.id) || 0;
                 const isSelectedInCart = inCartQty > 0;
+                const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
+                const isOutOfStock = branchStock <= 0;
+                const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
+
                 return (
                   <div
                     key={product.id}
                     onClick={() => addToCart(product)}
                     className={`group bg-white rounded-[6px] border transition-all duration-150 p-3.5 flex flex-col justify-between cursor-pointer relative ${
-                      isSelectedInCart
+                      isOutOfStock
+                        ? "border-slate-200 bg-slate-50/60 opacity-75"
+                        : isSelectedInCart
                         ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/10 shadow-xs"
                         : "border-slate-200/90 hover:border-blue-400 hover:shadow-2xs"
                     }`}
@@ -700,7 +843,7 @@ export default function POSBillingView() {
                     )}
 
                     {/* Product Image Thumbnail */}
-                    <div className="h-28 bg-slate-50 rounded-[4px] flex items-center justify-center mb-2.5 p-2 overflow-hidden border border-slate-100">
+                    <div className="h-28 bg-slate-50 rounded-[4px] flex items-center justify-center mb-2.5 p-2 overflow-hidden border border-slate-100 relative">
                       <img
                         src={product.imageUrl || "/logo.png"}
                         alt={product.name}
@@ -709,6 +852,13 @@ export default function POSBillingView() {
                           (e.target as HTMLImageElement).src = "/logo.png";
                         }}
                       />
+                      {isOutOfStock && (
+                        <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center">
+                          <span className="px-2 py-0.5 bg-red-600 text-white font-bold text-[10px] rounded-[3px]">
+                            Out of Stock
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Details */}
@@ -726,11 +876,19 @@ export default function POSBillingView() {
                       </div>
                     </div>
 
-                    {/* Category tag & Stock info */}
+                    {/* Category tag & Branch Stock info */}
                     <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-100 pt-2">
-                      <span className="truncate max-w-[90px]">{product.category}</span>
-                      <span className={product.stock <= 5 ? "text-amber-600 font-bold" : "text-slate-600"}>
-                        Stock: {product.stock}
+                      <span className="truncate max-w-[90px] font-medium">{product.category}</span>
+                      <span
+                        className={
+                          isOutOfStock
+                            ? "text-red-600 font-extrabold"
+                            : isLowStock
+                            ? "text-amber-600 font-bold"
+                            : "text-slate-700 font-semibold"
+                        }
+                      >
+                        {isOutOfStock ? "Out of Stock" : `Stock: ${branchStock} units`}
                       </span>
                     </div>
                   </div>
@@ -742,12 +900,18 @@ export default function POSBillingView() {
               {filteredProducts.map((product) => {
                 const inCartQty = cartQuantities.get(product.id) || 0;
                 const isSelectedInCart = inCartQty > 0;
+                const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
+                const isOutOfStock = branchStock <= 0;
+                const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
+
                 return (
                   <div
                     key={product.id}
                     onClick={() => addToCart(product)}
                     className={`flex items-center justify-between p-3 bg-white rounded-[6px] border transition-all cursor-pointer ${
-                      isSelectedInCart
+                      isOutOfStock
+                        ? "border-slate-200 bg-slate-50/60 opacity-75"
+                        : isSelectedInCart
                         ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/10"
                         : "border-slate-200 hover:border-blue-400 hover:shadow-2xs"
                     }`}
@@ -769,6 +933,18 @@ export default function POSBillingView() {
                           <span>{product.category}</span>
                           <span>•</span>
                           <span className="font-mono">{product.barcode || "No Barcode"}</span>
+                          <span>•</span>
+                          <span
+                            className={
+                              isOutOfStock
+                                ? "text-red-600 font-extrabold"
+                                : isLowStock
+                                ? "text-amber-600 font-bold"
+                                : "text-slate-600 font-semibold"
+                            }
+                          >
+                            {isOutOfStock ? "Out of Stock" : `Stock: ${branchStock} units`}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -778,13 +954,16 @@ export default function POSBillingView() {
                       </span>
                       <button
                         type="button"
+                        disabled={isOutOfStock}
                         className={`h-[32px] px-3 text-xs font-bold rounded-[5px] transition-colors ${
-                          isSelectedInCart
+                          isOutOfStock
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            : isSelectedInCart
                             ? "bg-blue-600 text-white"
                             : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                         }`}
                       >
-                        {isSelectedInCart ? `In Cart (${inCartQty})` : "+ Add"}
+                        {isOutOfStock ? "Unavailable" : isSelectedInCart ? `In Cart (${inCartQty})` : "+ Add"}
                       </button>
                     </div>
                   </div>
@@ -1413,8 +1592,13 @@ export default function POSBillingView() {
                 <div className="w-12 h-12 mx-auto mb-1 rounded-[6px] overflow-hidden">
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                 </div>
-                <h4 className="text-base font-extrabold text-slate-900">RETAILNEXT SUPERMARKET</h4>
-                <p className="text-[11px] text-slate-500">MG Road, Vijayawada, AP</p>
+                <h4 className="text-base font-extrabold text-slate-900">NATURAL FRESH</h4>
+                <p className="text-[11px] font-bold text-blue-700">
+                  Outlet: {completedInvoice.branchName || selectedBranch?.name || "Main Store"}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {selectedBranch?.address || "Guntur, Andhra Pradesh"}
+                </p>
                 <p className="text-[11px] text-slate-500 font-mono">GSTIN: 37AAAAA0000A1Z5</p>
               </div>
 

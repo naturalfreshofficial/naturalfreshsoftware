@@ -173,18 +173,12 @@ export default function StockPageClient() {
   };
 
   // Helper to get total branch-assigned stock for a product
-  const getConsolidatedBranchStock = (productId: string, fallbackStock: number): number => {
-    if (branches.length === 0) return fallbackStock;
-    let sum = 0;
-    let hasRecord = false;
-    branches.forEach((b) => {
+  const getConsolidatedBranchStock = (productId: string): number => {
+    if (branches.length === 0) return 0;
+    return branches.reduce((sum, b) => {
       const k = `${productId}_${b.id}`;
-      if (branchStockMap[k] !== undefined) {
-        sum += branchStockMap[k];
-        hasRecord = true;
-      }
-    });
-    return hasRecord ? sum : fallbackStock;
+      return sum + (branchStockMap[k] || 0);
+    }, 0);
   };
 
   // Compute products with calculated branch-wise analytics
@@ -193,7 +187,7 @@ export default function StockPageClient() {
       // Determine effective stock based on selected branch filter
       let effectiveStock: number;
       if (selectedBranchFilter === "all") {
-        effectiveStock = getConsolidatedBranchStock(p.id, p.stock);
+        effectiveStock = getConsolidatedBranchStock(p.id);
       } else {
         const key = `${p.id}_${selectedBranchFilter}`;
         effectiveStock = branchStockMap[key] !== undefined ? branchStockMap[key] : 0;
