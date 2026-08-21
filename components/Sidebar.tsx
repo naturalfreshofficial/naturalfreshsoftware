@@ -10,11 +10,8 @@ import {
   Users,
   Truck,
   Layers,
-  ShoppingCart,
   Receipt,
-  BarChart3,
   UserCheck,
-  Percent,
   Settings,
   Store,
   ChevronDown,
@@ -29,11 +26,8 @@ const NAV_ITEMS = [
   { name: "Suppliers", href: "/suppliers", icon: Truck },
   { name: "Branches", href: "/branches", icon: Store },
   { name: "Stock", href: "/stock", icon: Layers },
-  { name: "Purchase", href: "/purchase", icon: ShoppingCart },
   { name: "Expenses", href: "/expenses", icon: Receipt },
-  { name: "Reports", href: "/reports", icon: BarChart3 },
   { name: "Employees", href: "/employees", icon: UserCheck },
-  { name: "Discounts", href: "/discounts", icon: Percent },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

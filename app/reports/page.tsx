@@ -1,4 +1,4 @@
-import ReportsPageClient from "@/components/ReportsPageClient";
+import { redirect } from "next/navigation";
 
 export const metadata = {
   title: "Sales & Revenue Reports - Retailnext",
@@ -6,5 +6,5 @@ export const metadata = {
 };
 
 export default function ReportsPage() {
-  return <ReportsPageClient />;
+  redirect("/invoices");
 }

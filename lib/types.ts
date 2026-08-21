@@ -57,3 +57,39 @@ export interface Branch {
   createdAt?: any;
   updatedAt?: any;
 }
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  email?: string;
+  status?: "active" | "inactive";
+  totalOrders?: number;
+  totalPurchases?: number;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface SupplierOrderItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitPrice?: number;
+  total?: number;
+}
+
+export interface SupplierOrder {
+  id: string;
+  orderNumber: string;
+  supplierId: string;
+  supplierName: string;
+  supplierPhone: string;
+  items: SupplierOrderItem[];
+  totalQuantity: number;
+  totalAmount?: number;
+  status: "pending" | "received" | "cancelled";
+  notes?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
