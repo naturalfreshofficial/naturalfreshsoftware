@@ -351,7 +351,6 @@ export function downloadSampleExcel(productsList = SAMPLE_300_PRODUCTS, fileName
     "Category": p.category,
     "Price (INR)": p.price,
     "Barcode ID": p.barcode,
-    "Current Stock": p.stock,
     "Buffer Stock": p.bufferStock,
     "Status": p.status,
     "Is Favorite": p.isFavorite ? "Yes" : "No",
@@ -367,7 +366,6 @@ export function downloadSampleExcel(productsList = SAMPLE_300_PRODUCTS, fileName
     { wch: 22 }, // Category
     { wch: 14 }, // Price (INR)
     { wch: 18 }, // Barcode ID
-    { wch: 14 }, // Current Stock
     { wch: 14 }, // Buffer Stock
     { wch: 12 }, // Status
     { wch: 12 }, // Is Favorite
@@ -388,7 +386,6 @@ export function downloadBlankTemplate(fileName = "products_import_template.xlsx"
       "Category": "Ice Creams",
       "Price (INR)": 25.0,
       "Barcode ID": "8901262010011",
-      "Current Stock": 50,
       "Buffer Stock": 10,
       "Status": "active",
       "Is Favorite": "Yes",
@@ -399,7 +396,6 @@ export function downloadBlankTemplate(fileName = "products_import_template.xlsx"
       "Category": "Dairy",
       "Price (INR)": 29.0,
       "Barcode ID": "8901582020018",
-      "Current Stock": 100,
       "Buffer Stock": 20,
       "Status": "active",
       "Is Favorite": "No",
@@ -413,7 +409,6 @@ export function downloadBlankTemplate(fileName = "products_import_template.xlsx"
     { wch: 20 },
     { wch: 14 },
     { wch: 18 },
-    { wch: 14 },
     { wch: 14 },
     { wch: 12 },
     { wch: 12 },

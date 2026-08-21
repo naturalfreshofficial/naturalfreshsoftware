@@ -460,7 +460,7 @@ export default function BulkImportModal({
                       <th className="py-2.5 px-3">Category</th>
                       <th className="py-2.5 px-3">Barcode ID</th>
                       <th className="py-2.5 px-3 text-right">Price</th>
-                      <th className="py-2.5 px-3 text-center">Stock</th>
+                      <th className="py-2.5 px-3 text-center">Buffer Stock</th>
                       <th className="py-2.5 px-3 text-center">Status</th>
                     </tr>
                   </thead>
@@ -501,8 +501,8 @@ export default function BulkImportModal({
                         <td className="py-2 px-3 text-right font-bold text-slate-900">
                           ₹{Number(prod.price).toFixed(2)}
                         </td>
-                        <td className="py-2 px-3 text-center text-slate-700 font-semibold">
-                          {prod.stock}
+                        <td className="py-2 px-3 text-center text-slate-700 font-semibold font-mono">
+                          {prod.bufferStock}
                         </td>
                         <td className="py-2 px-3 text-center">
                           <span

@@ -93,3 +93,33 @@ export interface SupplierOrder {
   createdAt?: any;
   updatedAt?: any;
 }
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  monthlySalary: number;
+  acceptedLeaves: number;
+  role?: string;
+  branchId?: string;
+  branchName?: string;
+  status?: "active" | "inactive";
+  joinedDate?: any;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface Expense {
+  id: string;
+  title: string;
+  amount: number;
+  branchId: string;
+  branchName: string;
+  category?: string;
+  paymentMethod?: "Cash" | "UPI" | "Card" | "Bank Transfer";
+  date?: any;
+  notes?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
