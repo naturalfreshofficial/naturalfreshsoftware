@@ -21,12 +21,13 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { name: "POS Billing", href: "/pos-billing", icon: CreditCard, aliasHref: "/" },
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "POS Billing", href: "/pos-billing", icon: CreditCard, aliasHref: "/" },
   { name: "Invoices", href: "/invoices", icon: FileText },
   { name: "Products", href: "/products", icon: Package },
   { name: "Customers", href: "/customers", icon: Users },
   { name: "Suppliers", href: "/suppliers", icon: Truck },
+  { name: "Branches", href: "/branches", icon: Store },
   { name: "Stock", href: "/stock", icon: Layers },
   { name: "Purchase", href: "/purchase", icon: ShoppingCart },
   { name: "Expenses", href: "/expenses", icon: Receipt },
@@ -55,7 +56,7 @@ export default function Sidebar() {
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-base font-bold text-slate-900 tracking-tight truncate">Retailnext</span>
+            <span className="text-base font-bold text-slate-900 tracking-tight truncate">Natural Fresh</span>
             <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
           </div>
           <p className="text-[10px] tracking-wider text-slate-400 font-semibold uppercase truncate mt-0.5">
@@ -90,19 +91,23 @@ export default function Sidebar() {
 
       {/* Bottom Branch & Status Info */}
       <div className="p-3 border-t border-slate-100 space-y-2 bg-slate-50/50">
-        {/* Branch Selector */}
-        <div className="flex items-center justify-between px-2.5 h-[44px] rounded-[6px] border border-slate-200 bg-white hover:border-slate-300 transition-colors cursor-pointer">
+        {/* Branch Selector Shortcut */}
+        <Link
+          href="/branches"
+          title="Manage Branches"
+          className="flex items-center justify-between px-2.5 h-[44px] rounded-[6px] border border-slate-200 bg-white hover:border-blue-400 hover:shadow-2xs transition-all cursor-pointer block"
+        >
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-7 h-7 rounded-[6px] bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
               <Store className="w-3.5 h-3.5" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-slate-800 truncate">Main Branch</p>
-              <p className="text-[10px] text-slate-400 truncate">MG Road, Vijayawada</p>
+              <p className="text-xs font-semibold text-slate-800 truncate">Store Branches</p>
+              <p className="text-[10px] text-slate-400 truncate">Manage Outlets</p>
             </div>
           </div>
           <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-        </div>
+        </Link>
 
         {/* Online Status */}
         <div className="flex items-center justify-between px-3 h-[36px] text-xs font-medium text-slate-600 rounded-[6px] bg-white border border-slate-200">

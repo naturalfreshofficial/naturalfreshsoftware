@@ -13,177 +13,188 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Customer } from "@/lib/types";
-import { useToast } from "@/components/ToastProvider";
+import { Branch } from "@/lib/types";
 import {
-  Users,
+  Store,
   Search,
   Plus,
   Edit2,
   Trash2,
   Phone,
-  Mail,
   MapPin,
+  Mail,
   X,
   Check,
   RefreshCw,
-  CreditCard,
-  ShoppingBag,
-  IndianRupee,
+  Building2,
   FileSpreadsheet,
-  Download,
-  ArrowRight,
+  CheckCircle2,
+  ShieldAlert,
 } from "lucide-react";
-import Link from "next/link";
 import * as XLSX from "xlsx";
+import { useToast } from "@/components/ToastProvider";
+import CustomSelect from "@/components/CustomSelect";
 
-export default function CustomersPageClient() {
+export default function BranchesPageClient() {
   const toast = useToast();
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  const [branchName, setBranchName] = useState("");
+  const [branchPhone, setBranchPhone] = useState("");
+  const [branchAddress, setBranchAddress] = useState("");
+  const [branchEmail, setBranchEmail] = useState("");
+  const [branchStatus, setBranchStatus] = useState<"active" | "inactive">("active");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Subscribe to Firestore Customers Collection
+  // Subscribe to Firestore branches collection
   useEffect(() => {
     setLoading(true);
-    const q = query(collection(db, "customers"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "branches"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(
       q,
       (snapshot) => {
-        const items: Customer[] = [];
+        const items: Branch[] = [];
         snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as Customer);
+          items.push({ id: docSnap.id, ...docSnap.data() } as Branch);
         });
-        setCustomers(items);
+        setBranches(items);
         setLoading(false);
       },
       (err) => {
-        console.warn("Customers fallback query:", err);
-        const fallbackUnsub = onSnapshot(collection(db, "customers"), (snapshot) => {
-          const items: Customer[] = [];
+        console.warn("Branches query fallback:", err);
+        const fallbackUnsub = onSnapshot(collection(db, "branches"), (snapshot) => {
+          const items: Branch[] = [];
           snapshot.forEach((docSnap) => {
-            items.push({ id: docSnap.id, ...docSnap.data() } as Customer);
+            items.push({ id: docSnap.id, ...docSnap.data() } as Branch);
           });
-          setCustomers(items);
+          setBranches(items);
           setLoading(false);
         });
         return () => fallbackUnsub();
       }
     );
+
     return () => unsub();
   }, []);
 
-  // Filtered Customers
-  const filteredCustomers = useMemo(() => {
+  // Filtered Branches
+  const filteredBranches = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    if (!q) return customers;
-    return customers.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        (c.phone && c.phone.includes(q)) ||
-        (c.email && c.email.toLowerCase().includes(q)) ||
-        (c.address && c.address.toLowerCase().includes(q))
-    );
-  }, [customers, searchQuery]);
+    return branches.filter((b) => {
+      if (statusFilter !== "all" && b.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        b.name.toLowerCase().includes(q) ||
+        (b.phone && b.phone.includes(q)) ||
+        (b.address && b.address.toLowerCase().includes(q)) ||
+        (b.email && b.email.toLowerCase().includes(q))
+      );
+    });
+  }, [branches, searchQuery, statusFilter]);
 
-  // Summary Metrics
-  const totalCustomersCount = customers.length;
-  const totalSpentAll = customers.reduce((acc, c) => acc + (Number(c.totalSpent) || 0), 0);
-  const totalOrdersAll = customers.reduce((acc, c) => acc + (Number(c.totalOrders) || 0), 0);
+  // Statistics
+  const totalBranchesCount = branches.length;
+  const activeBranchesCount = branches.filter((b) => b.status !== "inactive").length;
 
-  // Open Modal
-  const openModal = (cust?: Customer) => {
-    if (cust) {
-      setEditingCustomer(cust);
-      setName(cust.name);
-      setPhone(cust.phone);
-      setEmail(cust.email || "");
-      setAddress(cust.address || "");
+  // Open Add/Edit Modal
+  const openModal = (b?: Branch) => {
+    if (b) {
+      setEditingBranch(b);
+      setBranchName(b.name);
+      setBranchPhone(b.phone);
+      setBranchAddress(b.address);
+      setBranchEmail(b.email || "");
+      setBranchStatus(b.status || "active");
     } else {
-      setEditingCustomer(null);
-      setName("");
-      setPhone("");
-      setEmail("");
-      setAddress("");
+      setEditingBranch(null);
+      setBranchName("");
+      setBranchPhone("");
+      setBranchAddress("");
+      setBranchEmail("");
+      setBranchStatus("active");
     }
     setIsModalOpen(true);
   };
 
-  // Save Customer (Add / Edit)
-  const handleSaveCustomer = async (e: React.FormEvent) => {
+  // Save Branch (Create or Edit)
+  const handleSaveBranch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      toast.warning("Please enter customer name");
+    if (!branchName.trim()) {
+      toast.warning("Please enter branch name");
       return;
     }
-    if (!phone.trim()) {
-      toast.warning("Please enter mobile number");
+    if (!branchPhone.trim()) {
+      toast.warning("Please enter branch mobile number");
+      return;
+    }
+    if (!branchAddress.trim()) {
+      toast.warning("Please enter branch address");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const customerData = {
-        name: name.trim(),
-        phone: phone.trim().replace(/\D/g, ""),
-        email: email.trim() || "",
-        address: address.trim() || "",
+      const branchData = {
+        name: branchName.trim(),
+        phone: branchPhone.trim().replace(/\D/g, ""),
+        address: branchAddress.trim(),
+        email: branchEmail.trim() || "",
+        status: branchStatus,
         updatedAt: serverTimestamp(),
       };
 
-      if (editingCustomer) {
-        await updateDoc(doc(db, "customers", editingCustomer.id), customerData);
-        toast.success(`Customer "${name.trim()}" updated successfully!`);
+      if (editingBranch) {
+        await updateDoc(doc(db, "branches", editingBranch.id), branchData);
+        toast.success(`Branch "${branchName.trim()}" updated successfully!`);
       } else {
-        await addDoc(collection(db, "customers"), {
-          ...customerData,
-          totalOrders: 0,
-          totalSpent: 0,
+        await addDoc(collection(db, "branches"), {
+          ...branchData,
           createdAt: serverTimestamp(),
         });
-        toast.success(`Customer "${name.trim()}" added successfully!`);
+        toast.success(`Branch "${branchName.trim()}" added successfully!`);
       }
 
       setIsModalOpen(false);
     } catch (err: any) {
-      console.error("Save customer error:", err);
-      toast.error("Failed to save customer: " + err.message);
+      console.error("Save branch error:", err);
+      toast.error("Failed to save branch: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Delete Customer
-  const handleDeleteCustomer = async (id: string, custName: string) => {
-    if (confirm(`Are you sure you want to delete customer "${custName}"?`)) {
+  // Delete Branch
+  const handleDeleteBranch = async (id: string, name: string) => {
+    if (confirm(`Are you sure you want to delete branch "${name}"?`)) {
       try {
-        await deleteDoc(doc(db, "customers", id));
-        toast.success(`Customer "${custName}" deleted.`);
+        await deleteDoc(doc(db, "branches", id));
+        toast.success(`Branch "${name}" deleted.`);
       } catch (err: any) {
-        toast.error("Error deleting customer: " + err.message);
+        toast.error("Error deleting branch: " + err.message);
       }
     }
   };
 
-  // Export Customers to Excel
+  // Export Branches to Excel
   const handleExportExcel = () => {
-    const data = filteredCustomers.map((c, idx) => ({
+    if (filteredBranches.length === 0) {
+      toast.warning("No branches to export");
+      return;
+    }
+
+    const data = filteredBranches.map((b, idx) => ({
       "SL No": idx + 1,
-      "Customer Name": c.name,
-      "Mobile Number": c.phone,
-      "Email Address": c.email || "—",
-      "Address": c.address || "—",
-      "Total Orders": c.totalOrders || 0,
-      "Total Spent (INR)": c.totalSpent || 0,
+      "Branch Name": b.name,
+      "Mobile Number": b.phone,
+      "Address": b.address,
+      "Email Address": b.email || "—",
+      "Status": b.status || "active",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -191,14 +202,14 @@ export default function CustomersPageClient() {
       { wch: 8 },
       { wch: 25 },
       { wch: 18 },
+      { wch: 35 },
       { wch: 25 },
-      { wch: 30 },
       { wch: 14 },
-      { wch: 18 },
     ];
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers");
-    XLSX.writeFile(workbook, "customers_list.xlsx");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Branches");
+    XLSX.writeFile(workbook, `branches_list_${Date.now()}.xlsx`);
+    toast.success(`Exported ${filteredBranches.length} branches to Excel!`);
   };
 
   return (
@@ -207,13 +218,13 @@ export default function CustomersPageClient() {
       <div className="bg-white rounded-[6px] border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Customers Directory</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Branches Management</h1>
             <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">
-              {totalCustomersCount} Total
+              {totalBranchesCount} Total
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manage customer records, mobile numbers, billing histories, and loyalty.
+            Manage physical retail store branches, contact mobile numbers, and street addresses.
           </p>
         </div>
 
@@ -221,10 +232,9 @@ export default function CustomersPageClient() {
           <button
             type="button"
             onClick={handleExportExcel}
-            title="Export customer list to Excel"
             className="h-[36px] px-3.5 flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-[6px] text-xs font-semibold transition-colors cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5 text-slate-500" />
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             <span>Export Excel</span>
           </button>
 
@@ -234,7 +244,7 @@ export default function CustomersPageClient() {
             className="h-[36px] px-4 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold transition-all shadow-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Customer</span>
+            <span>Add Branch</span>
           </button>
         </div>
       </div>
@@ -243,66 +253,82 @@ export default function CustomersPageClient() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-[6px] border border-slate-200 shadow-2xs flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-500">Total Registered Customers</p>
-            <p className="text-2xl font-extrabold text-slate-900">{totalCustomersCount}</p>
+            <p className="text-xs font-semibold text-slate-500">Total Store Outlets</p>
+            <p className="text-2xl font-extrabold text-slate-900">{totalBranchesCount}</p>
           </div>
           <div className="w-10 h-10 rounded-[6px] bg-blue-50 text-blue-600 flex items-center justify-center">
-            <Users className="w-5 h-5" />
+            <Building2 className="w-5 h-5" />
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-[6px] border border-slate-200 shadow-2xs flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-500">Total Customer Orders</p>
-            <p className="text-2xl font-extrabold text-emerald-600">{totalOrdersAll}</p>
+            <p className="text-xs font-semibold text-slate-500">Active Operational</p>
+            <p className="text-2xl font-extrabold text-emerald-600">{activeBranchesCount}</p>
           </div>
           <div className="w-10 h-10 rounded-[6px] bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <ShoppingBag className="w-5 h-5" />
+            <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-[6px] border border-slate-200 shadow-2xs flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-500">Customer Lifetime Revenue</p>
-            <p className="text-2xl font-extrabold text-slate-900">₹ {totalSpentAll.toFixed(2)}</p>
+            <p className="text-xs font-semibold text-slate-500">Inactive / Closed</p>
+            <p className="text-2xl font-extrabold text-slate-400">
+              {Math.max(0, totalBranchesCount - activeBranchesCount)}
+            </p>
           </div>
-          <div className="w-10 h-10 rounded-[6px] bg-amber-50 text-amber-600 flex items-center justify-center">
-            <IndianRupee className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-[6px] bg-slate-100 text-slate-500 flex items-center justify-center">
+            <Store className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Main Customers List Card */}
+      {/* Main Branches Table Card */}
       <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col overflow-hidden">
-        {/* Search Bar */}
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
+        {/* Search & Filter Bar */}
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative flex-1 w-full max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by customer name, mobile number, email or city..."
+              placeholder="Search branch name, mobile number, address..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-[36px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
             />
           </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <span className="text-xs font-semibold text-slate-500">Status:</span>
+            <CustomSelect
+              value={statusFilter}
+              onChange={(val) => setStatusFilter(val)}
+              options={[
+                { value: "all", label: "All Status" },
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              className="w-36"
+            />
+          </div>
         </div>
 
-        {/* Table */}
+        {/* Branches Table */}
         <div className="overflow-x-auto">
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
-              <p className="text-xs font-semibold">Loading customers from Firestore...</p>
+              <p className="text-xs font-semibold">Loading branches from Firestore...</p>
             </div>
-          ) : filteredCustomers.length === 0 ? (
+          ) : filteredBranches.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
-              <Users className="w-10 h-10 text-slate-300 mb-2" />
-              <p className="text-sm font-bold text-slate-700">No customers found</p>
+              <Building2 className="w-10 h-10 text-slate-300 mb-2" />
+              <p className="text-sm font-bold text-slate-700">No branches found</p>
               <p className="text-xs text-slate-400 max-w-sm mt-1">
                 {searchQuery
-                  ? "Try searching with a different name or mobile number."
-                  : "Add your first customer to start tracking loyalty and customer-wise sales."}
+                  ? "No branches matched your search. Try a different query."
+                  : "Add your first retail store branch outlet to manage multi-store operations."}
               </p>
               <button
                 type="button"
@@ -310,34 +336,33 @@ export default function CustomersPageClient() {
                 className="mt-4 h-[36px] px-4 flex items-center gap-2 bg-blue-600 text-white rounded-[6px] text-xs font-bold cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add First Customer</span>
+                <span>Add First Branch</span>
               </button>
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-5">
                 <tr>
-                  <th className="py-3 px-4">Customer Details</th>
+                  <th className="py-3 px-4">Branch Details</th>
                   <th className="py-3 px-4">Mobile Number</th>
+                  <th className="py-3 px-4">Address</th>
                   <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Address / City</th>
-                  <th className="py-3 px-4 text-center">Total Orders</th>
-                  <th className="py-3 px-4 text-right">Total Spent</th>
+                  <th className="py-3 px-4 text-center">Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredCustomers.map((cust) => (
-                  <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
-                    {/* Name & Avatar */}
+                {filteredBranches.map((branch) => (
+                  <tr key={branch.id} className="hover:bg-slate-50/70 transition-colors">
+                    {/* Branch Name */}
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-200">
-                          {cust.name.charAt(0).toUpperCase()}
+                        <div className="w-9 h-9 rounded-[6px] bg-blue-50 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 border border-blue-200">
+                          <Store className="w-4 h-4" />
                         </div>
                         <div>
-                          <p className="font-bold text-slate-900 text-xs">{cust.name}</p>
-                          <p className="text-[10px] text-slate-400">ID: {cust.id.slice(0, 8)}</p>
+                          <p className="font-bold text-slate-900 text-xs">{branch.name}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">ID: {branch.id.slice(0, 8)}</p>
                         </div>
                       </div>
                     </td>
@@ -346,69 +371,58 @@ export default function CustomersPageClient() {
                     <td className="py-3.5 px-4 font-mono text-slate-700 text-xs font-semibold">
                       <div className="flex items-center gap-1.5">
                         <Phone className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{cust.phone}</span>
+                        <span>{branch.phone}</span>
+                      </div>
+                    </td>
+
+                    {/* Address */}
+                    <td className="py-3.5 px-4 text-slate-700 text-xs max-w-sm">
+                      <div className="flex items-start gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                        <span className="leading-snug">{branch.address}</span>
                       </div>
                     </td>
 
                     {/* Email */}
                     <td className="py-3.5 px-4 text-slate-600 text-xs">
-                      {cust.email ? (
+                      {branch.email ? (
                         <div className="flex items-center gap-1.5">
                           <Mail className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{cust.email}</span>
+                          <span>{branch.email}</span>
                         </div>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
 
-                    {/* Address */}
-                    <td className="py-3.5 px-4 text-slate-600 text-xs max-w-xs truncate">
-                      {cust.address ? (
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span className="truncate">{cust.address}</span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-
-                    {/* Total Orders */}
+                    {/* Status */}
                     <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold text-xs border border-blue-100">
-                        {cust.totalOrders || 0} Bills
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-[10px] border ${
+                          branch.status === "inactive"
+                            ? "bg-slate-100 text-slate-600 border-slate-200"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        }`}
+                      >
+                        {branch.status === "inactive" ? "Inactive" : "Active"}
                       </span>
-                    </td>
-
-                    {/* Total Spent */}
-                    <td className="py-3.5 px-4 text-right font-extrabold text-slate-900 text-xs">
-                      ₹ {Number(cust.totalSpent || 0).toFixed(2)}
                     </td>
 
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        <Link
-                          href="/pos-billing"
-                          title="Start POS Billing for this Customer"
-                          className="h-[30px] px-2.5 flex items-center gap-1 rounded-[5px] bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white border border-blue-200 text-[11px] font-bold transition-colors cursor-pointer"
-                        >
-                          <span>Bill</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </Link>
                         <button
                           type="button"
-                          onClick={() => openModal(cust)}
-                          title="Edit Customer"
+                          onClick={() => openModal(branch)}
+                          title="Edit Branch"
                           className="h-[30px] w-[30px] flex items-center justify-center rounded-[5px] border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDeleteCustomer(cust.id, cust.name)}
-                          title="Delete Customer"
+                          onClick={() => handleDeleteBranch(branch.id, branch.name)}
+                          title="Delete Branch"
                           className="h-[30px] w-[30px] flex items-center justify-center rounded-[5px] border border-slate-200 hover:bg-red-50 hover:border-red-300 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -424,7 +438,7 @@ export default function CustomersPageClient() {
       </div>
 
       {/* ========================================================================= */}
-      {/* ADD / EDIT CUSTOMER MODAL */}
+      {/* ADD / EDIT BRANCH MODAL */}
       {/* ========================================================================= */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
@@ -432,10 +446,10 @@ export default function CustomersPageClient() {
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
-                  <Users className="w-4 h-4" />
+                  <Store className="w-4 h-4" />
                 </div>
                 <h3 className="text-base font-bold text-slate-900">
-                  {editingCustomer ? "Edit Customer Details" : "Add New Customer"}
+                  {editingBranch ? "Edit Branch Details" : "Add New Branch"}
                 </h3>
               </div>
               <button
@@ -447,17 +461,17 @@ export default function CustomersPageClient() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveCustomer} className="p-5 space-y-3.5 text-xs">
+            <form onSubmit={handleSaveBranch} className="p-5 space-y-3.5 text-xs">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Customer Name <span className="text-red-500">*</span>
+                  Branch Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Ramesh Kumar"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Guntur Main Branch, Vijayawada Outlet"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
                   className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
                 />
               </div>
@@ -470,9 +484,23 @@ export default function CustomersPageClient() {
                   type="tel"
                   required
                   placeholder="e.g. 9876543210"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  value={branchPhone}
+                  onChange={(e) => setBranchPhone(e.target.value)}
                   className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Address <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="e.g. Door No 4-5-6, Brodipet Main Road, Guntur, AP - 522002"
+                  value={branchAddress}
+                  onChange={(e) => setBranchAddress(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
                 />
               </div>
 
@@ -482,23 +510,25 @@ export default function CustomersPageClient() {
                 </label>
                 <input
                   type="email"
-                  placeholder="e.g. ramesh@gmail.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="e.g. guntur@naturalfresh.com"
+                  value={branchEmail}
+                  onChange={(e) => setBranchEmail(e.target.value)}
                   className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Address / City <span className="text-slate-400 font-normal">(Optional)</span>
+                  Status
                 </label>
-                <textarea
-                  rows={2}
-                  placeholder="e.g. Main Bazaar, Guntur, AP"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
+                <CustomSelect
+                  value={branchStatus}
+                  onChange={(val) => setBranchStatus(val as any)}
+                  options={[
+                    { value: "active", label: "Active (Operational)" },
+                    { value: "inactive", label: "Inactive (Closed / Temporary)" },
+                  ]}
+                  className="w-full"
                 />
               </div>
 
@@ -520,7 +550,7 @@ export default function CustomersPageClient() {
                   ) : (
                     <Check className="w-4 h-4" />
                   )}
-                  <span>Save Customer</span>
+                  <span>Save Branch</span>
                 </button>
               </div>
             </form>

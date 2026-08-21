@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Customer, Invoice, InvoiceItem } from "@/lib/types";
+import { useToast } from "@/components/ToastProvider";
 import {
   Search,
   LayoutGrid,
@@ -68,6 +69,7 @@ export interface POSCartItem {
 }
 
 export default function POSBillingView() {
+  const toast = useToast();
   // Products & Categories dynamic state from Firestore
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [categories, setCategories] = useState<string[]>(["All Categories"]);
@@ -292,11 +294,11 @@ export default function POSBillingView() {
   const handleSaveNewCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustName.trim()) {
-      alert("Please enter customer name");
+      toast.warning("Please enter customer name");
       return;
     }
     if (!newCustPhone.trim()) {
-      alert("Please enter customer mobile number");
+      toast.warning("Please enter customer mobile number");
       return;
     }
 
@@ -321,6 +323,7 @@ export default function POSBillingView() {
       setCustomerSearchQuery("");
       setIsCustomerDropdownOpen(false);
       setIsAddCustomerModalOpen(false);
+      toast.success(`Customer "${createdCust.name}" added & selected!`);
 
       // Reset form
       setNewCustName("");
@@ -329,7 +332,7 @@ export default function POSBillingView() {
       setNewCustAddress("");
     } catch (err: any) {
       console.error("Save customer error:", err);
-      alert("Failed to save customer: " + err.message);
+      toast.error("Failed to save customer: " + err.message);
     } finally {
       setIsSavingCustomer(false);
     }
@@ -348,12 +351,12 @@ export default function POSBillingView() {
   // SAVE TO DRAFT (Hold Bill)
   const handleSaveToDraft = async () => {
     if (cart.length === 0) {
-      alert("Cart is empty. Please add products before saving as draft.");
+      toast.warning("Cart is empty. Please add products before saving as draft.");
       return;
     }
 
     if (!selectedCustomer) {
-      alert("Customer selection is mandatory! Please select or add a customer.");
+      toast.warning("Customer selection is mandatory! Please select or add a customer.");
       setIsCustomerDropdownOpen(true);
       return;
     }
@@ -397,20 +400,20 @@ export default function POSBillingView() {
       if (activeDraftId) {
         // Update existing draft
         await updateDoc(doc(db, "invoices", activeDraftId), draftData as any);
-        alert("Draft bill updated successfully!");
+        toast.success("Draft bill updated successfully!");
       } else {
         // Create new draft
         await addDoc(collection(db, "invoices"), {
           ...draftData,
           createdAt: serverTimestamp(),
         });
-        alert("Bill saved to drafts! You can resume it anytime from 'Saved Draft Bills'.");
+        toast.success("Bill saved to drafts! You can resume it anytime from 'Saved Draft Bills'.");
       }
 
       clearCart();
     } catch (err: any) {
       console.error("Save draft error:", err);
-      alert("Failed to save draft: " + err.message);
+      toast.error("Failed to save draft: " + err.message);
     } finally {
       setIsSubmittingBill(false);
     }
@@ -454,6 +457,7 @@ export default function POSBillingView() {
     }
 
     setIsDraftsModalOpen(false);
+    toast.info(`Loaded draft bill (${draft.invoiceNumber}) into cart.`);
   };
 
   // DELETE DRAFT BILL
@@ -465,8 +469,9 @@ export default function POSBillingView() {
         if (activeDraftId === draftId) {
           setActiveDraftId(null);
         }
+        toast.success("Draft bill deleted.");
       } catch (err: any) {
-        alert("Error deleting draft: " + err.message);
+        toast.error("Error deleting draft: " + err.message);
       }
     }
   };
@@ -474,12 +479,12 @@ export default function POSBillingView() {
   // COMPLETE SALE / PROCEED TO PAYMENT
   const handleCompleteSale = async () => {
     if (cart.length === 0) {
-      alert("Cart is empty! Click products on the left to add items.");
+      toast.warning("Cart is empty! Click products on the left to add items.");
       return;
     }
 
     if (!selectedCustomer) {
-      alert("Customer selection is MANDATORY. Please search or add customer in Order Summary before checkout.");
+      toast.warning("Customer selection is MANDATORY. Please search or add customer in Order Summary before checkout.");
       setIsCustomerDropdownOpen(true);
       return;
     }
@@ -570,12 +575,13 @@ export default function POSBillingView() {
         createdAt: new Date(),
       } as any);
       setIsReceiptModalOpen(true);
+      toast.success(`Sale completed! Invoice ${invoiceNumber} created.`);
 
       // Reset cart for next customer
       clearCart();
     } catch (err: any) {
       console.error("Complete sale error:", err);
-      alert("Failed to complete sale: " + err.message);
+      toast.error("Failed to complete sale: " + err.message);
     } finally {
       setIsSubmittingBill(false);
     }

@@ -14,6 +14,7 @@ const geistMono = Geist_Mono({
 
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
+import { ToastProvider } from "@/components/ToastProvider";
 
 export const metadata: Metadata = {
   title: "Retailnext - Retail Management Solutions",
@@ -32,11 +33,13 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="h-full bg-slate-50 flex text-slate-800 antialiased font-sans" suppressHydrationWarning>
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-          <Header />
-          <main className="flex-1 overflow-y-auto">{children}</main>
-        </div>
+        <ToastProvider>
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+            <Header />
+            <main className="flex-1 overflow-y-auto">{children}</main>
+          </div>
+        </ToastProvider>
       </body>
     </html>
   );

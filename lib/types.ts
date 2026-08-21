@@ -45,3 +45,15 @@ export interface Invoice {
   createdAt?: any;
   updatedAt?: any;
 }
+
+export interface Branch {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  email?: string;
+  status?: "active" | "inactive";
+  managerName?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}

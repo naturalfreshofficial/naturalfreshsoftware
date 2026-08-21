@@ -13,7 +13,6 @@ import { Invoice } from "@/lib/types";
 import {
   BarChart3,
   Search,
-  Calendar,
   IndianRupee,
   Receipt,
   ShoppingBag,
@@ -31,6 +30,9 @@ import {
   Filter,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { useToast } from "@/components/ToastProvider";
+import CustomSelect from "@/components/CustomSelect";
+import CustomDatePicker from "@/components/CustomDatePicker";
 
 type DateRangePreset =
   | "today"
@@ -42,6 +44,7 @@ type DateRangePreset =
   | "custom";
 
 export default function ReportsPageClient() {
+  const toast = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -49,8 +52,14 @@ export default function ReportsPageClient() {
 
   // Date Range Filters (Default to 'today')
   const [datePreset, setDatePreset] = useState<DateRangePreset>("today");
-  const [customStartDate, setCustomStartDate] = useState<string>("");
-  const [customEndDate, setCustomEndDate] = useState<string>("");
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  });
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  });
 
   // Invoice Inspection Modal
   const [inspectInvoice, setInspectInvoice] = useState<Invoice | null>(null);
@@ -83,7 +92,6 @@ export default function ReportsPageClient() {
       },
       (err) => {
         console.warn("Invoices sync fallback:", err);
-        // Fallback without where clause if needed
         const fallbackUnsub = onSnapshot(collection(db, "invoices"), (snapshot) => {
           const items: Invoice[] = [];
           snapshot.forEach((docSnap) => {
@@ -111,8 +119,8 @@ export default function ReportsPageClient() {
     if (datePreset === "today") {
       start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     } else if (datePreset === "this_week") {
-      const day = now.getDay(); // 0 = Sunday
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
       start = new Date(now.setDate(diff));
       start.setHours(0, 0, 0, 0);
     } else if (datePreset === "this_month") {
@@ -182,10 +190,6 @@ export default function ReportsPageClient() {
     return filteredInvoices.reduce((acc, inv) => acc + (Number(inv.itemCount) || 0), 0);
   }, [filteredInvoices]);
 
-  const totalGstCollected = useMemo(() => {
-    return filteredInvoices.reduce((acc, inv) => acc + (Number(inv.taxAmount) || 0), 0);
-  }, [filteredInvoices]);
-
   // Payment Breakdown
   const paymentBreakdown = useMemo(() => {
     let upi = 0;
@@ -202,6 +206,11 @@ export default function ReportsPageClient() {
 
   // Export to Excel
   const handleExportSalesExcel = () => {
+    if (filteredInvoices.length === 0) {
+      toast.warning("No invoices to export for selected filter");
+      return;
+    }
+
     const data = filteredInvoices.map((inv, idx) => {
       const dateStr = inv.createdAt?.toDate
         ? inv.createdAt.toDate().toLocaleString()
@@ -240,6 +249,7 @@ export default function ReportsPageClient() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Report");
     XLSX.writeFile(workbook, `sales_report_${datePreset}_${Date.now()}.xlsx`);
+    toast.success(`Exported ${filteredInvoices.length} sales records to Excel!`);
   };
 
   return (
@@ -259,78 +269,22 @@ export default function ReportsPageClient() {
         </div>
 
         {/* Date Filter Bar & Export */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Preset Buttons */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-[6px] border border-slate-200 overflow-x-auto text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setDatePreset("today")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "today"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatePreset("this_week")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "this_week"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              This Week
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatePreset("this_month")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "this_month"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              This Month
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatePreset("last_month")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "last_month"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              Last Month
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatePreset("this_year")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "this_year"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              This Year
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatePreset("custom")}
-              className={`px-3 h-[30px] rounded-[4px] transition-all cursor-pointer ${
-                datePreset === "custom"
-                  ? "bg-blue-600 text-white shadow-2xs font-bold"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200"
-              }`}
-            >
-              Custom Range
-            </button>
-          </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Custom Date Picker Component with Range and Calendar */}
+          <CustomDatePicker
+            isRange={true}
+            startDate={customStartDate}
+            endDate={customEndDate}
+            preset={datePreset}
+            onPresetChange={(p) => setDatePreset(p as any)}
+            onChange={(start, end) => {
+              setCustomStartDate(start);
+              if (end) setCustomEndDate(end);
+              setDatePreset("custom");
+            }}
+          />
 
-          {/* Export Excel */}
+          {/* Export Excel Button */}
           <button
             type="button"
             onClick={handleExportSalesExcel}
@@ -341,42 +295,6 @@ export default function ReportsPageClient() {
           </button>
         </div>
       </div>
-
-      {/* Custom Date Pickers (Shown if "Custom Range" is selected) */}
-      {datePreset === "custom" && (
-        <div className="bg-white p-3.5 rounded-[6px] border border-blue-200 shadow-2xs flex flex-wrap items-center gap-4 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">From Date:</span>
-            <input
-              type="date"
-              value={customStartDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
-              className="h-[32px] px-2.5 bg-slate-50 border border-slate-300 rounded-[5px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">To Date:</span>
-            <input
-              type="date"
-              value={customEndDate}
-              onChange={(e) => setCustomEndDate(e.target.value)}
-              className="h-[32px] px-2.5 bg-slate-50 border border-slate-300 rounded-[5px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          {(customStartDate || customEndDate) && (
-            <button
-              type="button"
-              onClick={() => {
-                setCustomStartDate("");
-                setCustomEndDate("");
-              }}
-              className="text-xs text-blue-600 hover:underline font-semibold"
-            >
-              Reset custom range
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -462,16 +380,17 @@ export default function ReportsPageClient() {
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <span className="text-xs font-semibold text-slate-500">Payment:</span>
-            <select
+            <CustomSelect
               value={paymentFilter}
-              onChange={(e) => setPaymentFilter(e.target.value)}
-              className="h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-            >
-              <option value="all">All Modes</option>
-              <option value="UPI">UPI Only</option>
-              <option value="Cash">Cash Only</option>
-              <option value="Card">Card Only</option>
-            </select>
+              onChange={(val) => setPaymentFilter(val)}
+              options={[
+                { value: "all", label: "All Modes" },
+                { value: "UPI", label: "UPI Only", icon: <QrCode className="w-3.5 h-3.5 text-blue-600" /> },
+                { value: "Cash", label: "Cash Only", icon: <Banknote className="w-3.5 h-3.5 text-emerald-600" /> },
+                { value: "Card", label: "Card Only", icon: <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> },
+              ]}
+              className="w-36"
+            />
           </div>
         </div>
 

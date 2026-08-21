@@ -31,6 +31,7 @@ import {
   downloadBlankTemplate,
   parseExcelProducts,
 } from "@/lib/sampleProducts";
+import { useToast } from "@/components/ToastProvider";
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export default function BulkImportModal({
   existingCategories,
   onImportComplete,
 }: BulkImportModalProps) {
+  const toast = useToast();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [parsedProducts, setParsedProducts] = useState<SampleProductData[]>([]);
   const [detectedCategories, setDetectedCategories] = useState<string[]>([]);
@@ -203,12 +205,13 @@ export default function BulkImportModal({
 
       setImportSuccessCount(importedCount);
       setImportStatusText("Import completed successfully!");
+      toast.success(`Successfully imported ${importedCount} products into Firestore!`);
       if (onImportComplete) {
         onImportComplete();
       }
     } catch (err: any) {
       console.error("Bulk import failed:", err);
-      alert("Bulk import error: " + (err.message || "Failed to write to database"));
+      toast.error("Bulk import error: " + (err.message || "Failed to write to database"));
     } finally {
       setIsImporting(false);
     }
