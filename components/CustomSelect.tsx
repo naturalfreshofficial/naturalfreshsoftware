@@ -22,6 +22,7 @@ interface CustomSelectProps {
   disabled?: boolean;
   searchable?: boolean;
   size?: "sm" | "md";
+  align?: "left" | "right" | "auto";
 }
 
 export default function CustomSelect({
@@ -34,6 +35,7 @@ export default function CustomSelect({
   disabled = false,
   searchable = false,
   size = "md",
+  align = "auto",
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -72,6 +74,12 @@ export default function CustomSelect({
   }, []);
 
   const heightClass = size === "sm" ? "h-[32px] text-xs px-2.5" : "h-[36px] text-xs px-3";
+  const alignClass =
+    align === "left"
+      ? "left-0"
+      : align === "right"
+      ? "right-0"
+      : "left-0 sm:left-auto sm:right-0";
 
   return (
     <div className={`relative inline-block ${className}`} ref={dropdownRef}>
@@ -108,7 +116,9 @@ export default function CustomSelect({
 
       {/* Popover Dropdown Menu */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 min-w-[280px] w-full bg-white border border-slate-200 rounded-[6px] shadow-2xl z-[999] overflow-hidden divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-100">
+        <div
+          className={`absolute top-full ${alignClass} mt-1 min-w-[240px] w-full max-w-[340px] bg-white border border-slate-200 rounded-[6px] shadow-2xl z-[9999] overflow-hidden divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-100`}
+        >
           {/* Search Input supporting name, barcode, product ID */}
           {searchable && (
             <div className="p-2 border-b border-slate-100 bg-slate-50/80">

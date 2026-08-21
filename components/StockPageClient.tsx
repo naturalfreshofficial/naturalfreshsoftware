@@ -655,9 +655,9 @@ export default function StockPageClient() {
       {/* ========================================================================= */}
       {/* MAIN STOCK LIST TABLE */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col overflow-hidden">
+      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col relative z-10">
         {/* Filter & Search Bar */}
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 relative z-30">
           <div className="relative flex-1 w-full max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -676,6 +676,7 @@ export default function StockPageClient() {
               onChange={(val) => setSelectedCategory(val)}
               options={categories.map((c) => ({ value: c, label: c }))}
               searchable={true}
+              align="right"
               className="w-44"
             />
 
@@ -690,13 +691,14 @@ export default function StockPageClient() {
                 { value: "closer_buffer", label: "🟡 Closer to Buffer" },
                 { value: "good_stock", label: "🟢 Good Stock" },
               ]}
+              align="right"
               className="w-48"
             />
           </div>
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-b-[6px]">
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />

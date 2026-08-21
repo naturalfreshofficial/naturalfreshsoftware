@@ -28,6 +28,10 @@ import {
   TrendingUp,
   Filter,
   Store,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
@@ -43,6 +47,8 @@ type DateRangePreset =
   | "all_time"
   | "custom";
 
+const ITEMS_PER_PAGE = 45;
+
 export default function ReportsPageClient() {
   const toast = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -51,6 +57,9 @@ export default function ReportsPageClient() {
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Date Range Filters (Default to 'today')
   const [datePreset, setDatePreset] = useState<DateRangePreset>("today");
@@ -129,6 +138,11 @@ export default function ReportsPageClient() {
     return () => unsubBranches();
   }, []);
 
+  // Reset pagination to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, paymentFilter, selectedBranchFilter, datePreset, customStartDate, customEndDate]);
+
   // Compute Date Boundaries based on selected preset
   const dateRangeLimits = useMemo(() => {
     const now = new Date();
@@ -206,7 +220,14 @@ export default function ReportsPageClient() {
     });
   }, [invoices, selectedBranchFilter, dateRangeLimits, paymentFilter, searchQuery]);
 
-  // Summary Metrics calculations
+  // Pagination Computations
+  const totalPages = Math.ceil(filteredInvoices.length / ITEMS_PER_PAGE) || 1;
+  const paginatedInvoices = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredInvoices.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredInvoices, currentPage]);
+
+  // Summary Metrics calculations (Calculated on the entire filtered set)
   const totalRevenue = useMemo(() => {
     return filteredInvoices.reduce((acc, inv) => acc + (Number(inv.totalPayable) || 0), 0);
   }, [filteredInvoices]);
@@ -393,9 +414,9 @@ export default function ReportsPageClient() {
       </div>
 
       {/* Main Bills List Table */}
-      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col overflow-hidden">
+      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col relative z-10">
         {/* Search, Branch Filter & Payment Filter Bar */}
-        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-3 relative z-30">
           <div className="relative flex-1 w-full max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -422,6 +443,7 @@ export default function ReportsPageClient() {
                   })),
                 ]}
                 searchable={true}
+                align="right"
                 className="w-48"
               />
             </div>
@@ -437,6 +459,7 @@ export default function ReportsPageClient() {
                   { value: "Cash", label: "Cash Only", icon: <Banknote className="w-3.5 h-3.5 text-emerald-600" /> },
                   { value: "Card", label: "Card Only", icon: <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> },
                 ]}
+                align="right"
                 className="w-36"
               />
             </div>
@@ -444,13 +467,13 @@ export default function ReportsPageClient() {
         </div>
 
         {/* Sales Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-b-[6px]">
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
               <p className="text-xs font-semibold">Loading sales reports from Firestore...</p>
             </div>
-          ) : filteredInvoices.length === 0 ? (
+          ) : paginatedInvoices.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
               <Receipt className="w-10 h-10 text-slate-300 mb-2" />
               <p className="text-sm font-bold text-slate-700">No sales bills found</p>
@@ -464,6 +487,7 @@ export default function ReportsPageClient() {
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-5">
                 <tr>
+                  <th className="py-3 px-4 w-12 text-center">#</th>
                   <th className="py-3 px-4">Invoice #</th>
                   <th className="py-3 px-4">Store Branch</th>
                   <th className="py-3 px-4">Date & Time</th>
@@ -477,13 +501,19 @@ export default function ReportsPageClient() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInvoices.map((inv) => {
+                {paginatedInvoices.map((inv, idx) => {
+                  const absoluteIndex = (currentPage - 1) * ITEMS_PER_PAGE + idx + 1;
                   const dateStr = inv.createdAt?.toDate
                     ? inv.createdAt.toDate().toLocaleString()
                     : "—";
 
                   return (
                     <tr key={inv.id} className="hover:bg-slate-50/70 transition-colors">
+                      {/* Row Index */}
+                      <td className="py-3.5 px-4 text-center text-slate-400 font-mono text-[11px]">
+                        {absoluteIndex}
+                      </td>
+
                       {/* Invoice Number */}
                       <td className="py-3.5 px-4 font-mono font-bold text-blue-700 text-xs">
                         {inv.invoiceNumber}
@@ -569,6 +599,101 @@ export default function ReportsPageClient() {
             </table>
           )}
         </div>
+
+        {/* Pagination Bar */}
+        {filteredInvoices.length > 0 && (
+          <div className="p-3.5 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-slate-500 font-medium text-center sm:text-left">
+              Showing{" "}
+              <span className="font-bold text-slate-800">
+                {(currentPage - 1) * ITEMS_PER_PAGE + 1}
+              </span>{" "}
+              to{" "}
+              <span className="font-bold text-slate-800">
+                {Math.min(currentPage * ITEMS_PER_PAGE, filteredInvoices.length)}
+              </span>{" "}
+              of <span className="font-bold text-slate-800">{filteredInvoices.length}</span>{" "}
+              invoices <span className="text-slate-400 font-normal">({ITEMS_PER_PAGE} per page)</span>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                {/* First Page */}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className="h-[30px] w-[30px] flex items-center justify-center rounded-[4px] border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="First Page"
+                >
+                  <ChevronsLeft className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Previous Page */}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="h-[30px] px-2.5 flex items-center gap-1 rounded-[4px] border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-medium"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+
+                {/* Page Number Pills */}
+                <div className="flex items-center gap-1 mx-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum = i + 1;
+                    if (totalPages > 5) {
+                      if (currentPage > 3) {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      if (pageNum > totalPages) {
+                        pageNum = totalPages - 4 + i;
+                      }
+                    }
+                    return (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`h-[30px] min-w-[30px] px-2 flex items-center justify-center rounded-[4px] font-bold text-xs transition-colors cursor-pointer ${
+                          currentPage === pageNum
+                            ? "bg-blue-600 text-white shadow-2xs"
+                            : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Next Page */}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="h-[30px] px-2.5 flex items-center gap-1 rounded-[4px] border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-medium"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Last Page */}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className="h-[30px] w-[30px] flex items-center justify-center rounded-[4px] border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Last Page"
+                >
+                  <ChevronsRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
