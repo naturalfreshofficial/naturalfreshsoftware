@@ -1,5 +1,5 @@
 import POSBillingView from "@/components/POSBillingView";
 
-export default function Page() {
+export default function POSBillingPage() {
   return <POSBillingView />;
 }
