@@ -15,6 +15,7 @@ import {
   Settings,
   Store,
   ChevronDown,
+  Boxes,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { name: "Suppliers", href: "/suppliers", icon: Truck },
   { name: "Branches", href: "/branches", icon: Store },
   { name: "Stock", href: "/stock", icon: Layers },
+  { name: "Stock Assignment", href: "/stock-assignment", icon: Boxes },
   { name: "Expenses", href: "/expenses", icon: Receipt },
   { name: "Employees", href: "/employees", icon: UserCheck },
   { name: "Settings", href: "/settings", icon: Settings },

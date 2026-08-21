@@ -123,3 +123,14 @@ export interface Expense {
   createdAt?: any;
   updatedAt?: any;
 }
+
+export interface BranchStock {
+  id: string; // `${productId}_${branchId}`
+  productId: string;
+  productName?: string;
+  branchId: string;
+  branchName?: string;
+  quantity: number;
+  updatedAt?: any;
+}
+

@@ -6,9 +6,11 @@ import {
   onSnapshot,
   updateDoc,
   doc,
+  setDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { Branch } from "@/lib/types";
 import {
   Layers,
   Search,
@@ -28,7 +30,10 @@ import {
   Package,
   IndianRupee,
   SlidersHorizontal,
+  Store,
+  Boxes,
 } from "lucide-react";
+import Link from "next/link";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
 import CustomSelect from "@/components/CustomSelect";
@@ -54,26 +59,29 @@ export interface StockProduct {
 export default function StockPageClient() {
   const toast = useToast();
   const [products, setProducts] = useState<StockProduct[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  // Mapping of `${productId}_${branchId}` -> quantity
+  const [branchStockMap, setBranchStockMap] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<string[]>(["All Categories"]);
   const [loading, setLoading] = useState(true);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
   const [selectedCategory, setSelectedCategory] = useState("All Categories");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<
     "all" | StockHealthStatus
   >("all");
 
   // Quick Stock Adjustment Modal State
-  const [adjustingProduct, setAdjustingProduct] = useState<StockProduct | null>(
-    null
-  );
+  const [adjustingProduct, setAdjustingProduct] = useState<StockProduct | null>(null);
+  const [adjustBranchId, setAdjustBranchId] = useState<string>("");
   const [adjustmentType, setAdjustmentType] = useState<"add" | "set">("add");
   const [adjustQty, setAdjustQty] = useState<number | "">("");
   const [adjustBufferQty, setAdjustBufferQty] = useState<number | "">("");
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
 
-  // Subscribe to Products & Categories in Firestore
+  // 1. Subscribe to Products in Firestore
   useEffect(() => {
     setLoading(true);
     const unsubProducts = onSnapshot(
@@ -101,17 +109,54 @@ export default function StockPageClient() {
           }
         });
 
+        items.sort((a, b) => a.name.localeCompare(b.name));
         setProducts(items);
         setCategories(["All Categories", ...Array.from(catSet)]);
         setLoading(false);
       },
       (err) => {
-        console.error("Stock listener error:", err);
+        console.error("Stock products listener error:", err);
         setLoading(false);
       }
     );
 
     return () => unsubProducts();
+  }, []);
+
+  // 2. Subscribe to Branches in Firestore
+  useEffect(() => {
+    const unsubBranches = onSnapshot(collection(db, "branches"), (snapshot) => {
+      const bList: Branch[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.status !== "inactive") {
+          bList.push({ id: docSnap.id, ...d } as Branch);
+        }
+      });
+      bList.sort((a, b) => a.name.localeCompare(b.name));
+      setBranches(bList);
+    });
+
+    return () => unsubBranches();
+  }, []);
+
+  // 3. Subscribe to Branch Stocks in Firestore
+  useEffect(() => {
+    const unsubBranchStocks = onSnapshot(
+      collection(db, "branch_stocks"),
+      (snapshot) => {
+        const map: Record<string, number> = {};
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data();
+          if (d.productId && d.branchId) {
+            map[`${d.productId}_${d.branchId}`] = Number(d.quantity) || 0;
+          }
+        });
+        setBranchStockMap(map);
+      }
+    );
+
+    return () => unsubBranchStocks();
   }, []);
 
   // Helper to determine Stock Health Status
@@ -127,23 +172,56 @@ export default function StockPageClient() {
     }
   };
 
-  // Compute products with calculated analytics
+  // Helper to get total branch-assigned stock for a product
+  const getConsolidatedBranchStock = (productId: string, fallbackStock: number): number => {
+    if (branches.length === 0) return fallbackStock;
+    let sum = 0;
+    let hasRecord = false;
+    branches.forEach((b) => {
+      const k = `${productId}_${b.id}`;
+      if (branchStockMap[k] !== undefined) {
+        sum += branchStockMap[k];
+        hasRecord = true;
+      }
+    });
+    return hasRecord ? sum : fallbackStock;
+  };
+
+  // Compute products with calculated branch-wise analytics
   const analyzedProducts = useMemo(() => {
     return products.map((p) => {
-      const health = getProductStockHealth(p.stock, p.bufferStock);
-      const stockValuation = p.stock * p.price;
-      // Health ratio percentage
-      const ratio = p.bufferStock > 0 ? Math.min(200, (p.stock / p.bufferStock) * 100) : 100;
+      // Determine effective stock based on selected branch filter
+      let effectiveStock: number;
+      if (selectedBranchFilter === "all") {
+        effectiveStock = getConsolidatedBranchStock(p.id, p.stock);
+      } else {
+        const key = `${p.id}_${selectedBranchFilter}`;
+        effectiveStock = branchStockMap[key] !== undefined ? branchStockMap[key] : 0;
+      }
+
+      const health = getProductStockHealth(effectiveStock, p.bufferStock);
+      const stockValuation = effectiveStock * p.price;
+      const ratio = p.bufferStock > 0 ? Math.min(200, (effectiveStock / p.bufferStock) * 100) : 100;
+
+      // Branch breakdown details
+      const branchBreakdown = branches.map((b) => ({
+        branchId: b.id,
+        branchName: b.name,
+        qty: branchStockMap[`${p.id}_${b.id}`] || 0,
+      }));
+
       return {
         ...p,
+        effectiveStock,
         health,
         stockValuation,
         ratio,
+        branchBreakdown,
       };
     });
-  }, [products]);
+  }, [products, branches, branchStockMap, selectedBranchFilter]);
 
-  // Aggregate Category Counts & Valuation KPI
+  // Aggregate Category Counts & Valuation KPI for current branch filter
   const stats = useMemo(() => {
     let crossed = 0;
     let reached = 0;
@@ -153,7 +231,7 @@ export default function StockPageClient() {
     let totalValuation = 0;
 
     analyzedProducts.forEach((p) => {
-      totalStockUnits += Math.max(0, p.stock);
+      totalStockUnits += Math.max(0, p.effectiveStock);
       totalValuation += Math.max(0, p.stockValuation);
 
       if (p.health === "crossed_buffer") crossed++;
@@ -200,9 +278,17 @@ export default function StockPageClient() {
     });
   }, [analyzedProducts, selectedStatusFilter, selectedCategory, searchQuery]);
 
+  // Selected Branch Name
+  const selectedBranchName = useMemo(() => {
+    if (selectedBranchFilter === "all") return "All Branches (Consolidated)";
+    const b = branches.find((item) => item.id === selectedBranchFilter);
+    return b ? b.name : "Selected Branch";
+  }, [selectedBranchFilter, branches]);
+
   // Open Quick Stock Adjust Modal
   const openAdjustModal = (product: StockProduct) => {
     setAdjustingProduct(product);
+    setAdjustBranchId(selectedBranchFilter !== "all" ? selectedBranchFilter : (branches[0]?.id || ""));
     setAdjustmentType("add");
     setAdjustQty("");
     setAdjustBufferQty("");
@@ -213,16 +299,21 @@ export default function StockPageClient() {
     e.preventDefault();
     if (!adjustingProduct) return;
 
-    let newStock = adjustingProduct.stock;
+    const targetBranchId = adjustBranchId || (branches[0]?.id || "");
+    const targetBranch = branches.find((b) => b.id === targetBranchId);
+    const key = `${adjustingProduct.id}_${targetBranchId}`;
+    const currentBranchStock = branchStockMap[key] || 0;
+
+    let newBranchStock = currentBranchStock;
     if (adjustmentType === "add") {
       const added = Number(adjustQty) || 0;
-      newStock += added;
+      newBranchStock += added;
     } else {
       if (adjustQty === "" || Number(adjustQty) < 0) {
         toast.warning("Please enter a valid stock quantity");
         return;
       }
-      newStock = Number(adjustQty);
+      newBranchStock = Number(adjustQty);
     }
 
     const newBuffer =
@@ -232,14 +323,41 @@ export default function StockPageClient() {
 
     setIsUpdatingStock(true);
     try {
+      // 1. Update branch stock document in branch_stocks
+      if (targetBranchId) {
+        await setDoc(
+          doc(db, "branch_stocks", key),
+          {
+            productId: adjustingProduct.id,
+            productName: adjustingProduct.name,
+            branchId: targetBranchId,
+            branchName: targetBranch?.name || "",
+            quantity: newBranchStock,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      // 2. Calculate updated product consolidated stock
+      let updatedTotal = 0;
+      branches.forEach((b) => {
+        if (b.id === targetBranchId) {
+          updatedTotal += newBranchStock;
+        } else {
+          updatedTotal += branchStockMap[`${adjustingProduct.id}_${b.id}`] || 0;
+        }
+      });
+
+      // 3. Update main product document in products
       await updateDoc(doc(db, "products", adjustingProduct.id), {
-        stock: newStock,
+        stock: updatedTotal,
         bufferStock: newBuffer,
         updatedAt: serverTimestamp(),
       });
 
       toast.success(
-        `Updated stock for "${adjustingProduct.name}" (Stock: ${newStock}, Buffer: ${newBuffer})`
+        `Updated stock for "${adjustingProduct.name}" at ${targetBranch?.name || "branch"} (${newBranchStock} units)`
       );
       setAdjustingProduct(null);
     } catch (err: any) {
@@ -257,40 +375,44 @@ export default function StockPageClient() {
       return;
     }
 
-    const data = filteredProducts.map((p, idx) => ({
-      "SL No": idx + 1,
-      "Product Name": p.name,
-      "Category": p.category,
-      "Barcode": p.barcode || "—",
-      "Current Stock": p.stock,
-      "Buffer Stock Limit": p.bufferStock,
-      "Stock Health Status":
-        p.health === "crossed_buffer"
-          ? "Crossed Buffer (Critical Restock)"
-          : p.health === "reached_buffer"
-          ? "Reached Buffer (Threshold)"
-          : p.health === "closer_buffer"
-          ? "Closer to Buffer (Warning)"
-          : "Good Stock (Healthy)",
-      "Unit Price (INR)": p.price,
-      "Total Valuation (INR)": p.stockValuation,
-    }));
+    const data = filteredProducts.map((p, idx) => {
+      const row: Record<string, any> = {
+        "SL No": idx + 1,
+        "Product Name": p.name,
+        Category: p.category,
+        Barcode: p.barcode || "—",
+        "Selected View": selectedBranchName,
+        "Stock Units": p.effectiveStock,
+        "Buffer Limit": p.bufferStock,
+        "Health Status":
+          p.health === "crossed_buffer"
+            ? "Crossed Buffer (Critical)"
+            : p.health === "reached_buffer"
+            ? "Reached Buffer (Limit)"
+            : p.health === "closer_buffer"
+            ? "Closer to Buffer (Warning)"
+            : "Good Stock (Healthy)",
+        "Unit Price (INR)": p.price,
+        "Total Valuation (INR)": p.stockValuation,
+      };
+
+      // If consolidated view, append branch breakdown columns
+      if (selectedBranchFilter === "all") {
+        branches.forEach((b) => {
+          row[b.name] = branchStockMap[`${p.id}_${b.id}`] || 0;
+        });
+      }
+
+      return row;
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(data);
-    worksheet["!cols"] = [
-      { wch: 8 },
-      { wch: 28 },
-      { wch: 20 },
-      { wch: 18 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 30 },
-      { wch: 16 },
-      { wch: 20 },
-    ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Analytics");
-    XLSX.writeFile(workbook, `stock_analytics_${selectedStatusFilter}_${Date.now()}.xlsx`);
+    XLSX.writeFile(
+      workbook,
+      `stock_analytics_${selectedBranchFilter}_${Date.now()}.xlsx`
+    );
     toast.success(`Exported ${filteredProducts.length} stock items to Excel!`);
   };
 
@@ -308,11 +430,34 @@ export default function StockPageClient() {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time inventory levels, buffer threshold indicators, critical stock depletion alerts, and valuation.
+            Branch-wise inventory tracking, buffer threshold indicators, critical stock depletion alerts, and valuation.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Branch Filter Selector */}
+          <div className="flex items-center gap-1.5">
+            <Store className="w-4 h-4 text-blue-600 shrink-0" />
+            <CustomSelect
+              value={selectedBranchFilter}
+              onChange={(val) => setSelectedBranchFilter(val)}
+              options={[
+                { value: "all", label: "🏢 All Branches (Consolidated)" },
+                ...branches.map((b) => ({ value: b.id, label: `📍 ${b.name}` })),
+              ]}
+              searchable={true}
+              className="w-56"
+            />
+          </div>
+
+          <Link
+            href="/stock-assignment"
+            className="h-[36px] px-3.5 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold transition-all shadow-xs cursor-pointer"
+          >
+            <Boxes className="w-4 h-4" />
+            <span>Stock Assignment Matrix</span>
+          </Link>
+
           <button
             type="button"
             onClick={handleExportStockExcel}
@@ -477,9 +622,16 @@ export default function StockPageClient() {
         </div>
       </div>
 
-      {/* Inventory Valuation Bar */}
+      {/* Inventory Valuation Bar with Current Branch Context */}
       <div className="bg-white p-3.5 rounded-[6px] border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-4 text-xs font-semibold text-slate-700">
         <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <Store className="w-4 h-4 text-blue-600" />
+            <span className="text-slate-400 font-normal">Active Scope: </span>
+            <span className="font-extrabold text-blue-700">
+              {selectedBranchName}
+            </span>
+          </div>
           <div>
             <span className="text-slate-400 font-normal">Total Stock Units: </span>
             <span className="font-extrabold text-slate-900 font-mono">
@@ -487,8 +639,8 @@ export default function StockPageClient() {
             </span>
           </div>
           <div>
-            <span className="text-slate-400 font-normal">Total Inventory Value: </span>
-            <span className="font-extrabold text-slate-900">
+            <span className="text-slate-400 font-normal">Inventory Valuation: </span>
+            <span className="font-extrabold text-emerald-700 font-mono">
               ₹ {stats.totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
@@ -572,9 +724,14 @@ export default function StockPageClient() {
                 <tr>
                   <th className="py-3 px-4">Product Details</th>
                   <th className="py-3 px-4">Category</th>
-                  <th className="py-3 px-4 text-center">Current Stock</th>
+                  <th className="py-3 px-4 text-center">
+                    {selectedBranchFilter === "all" ? "Total Stock" : "Branch Stock"}
+                  </th>
                   <th className="py-3 px-4 text-center">Buffer Threshold</th>
-                  <th className="py-3 px-4 text-center">Buffer Status</th>
+                  <th className="py-3 px-4 text-center">Health Status</th>
+                  {selectedBranchFilter === "all" && (
+                    <th className="py-3 px-4 text-center">Branch Breakdown</th>
+                  )}
                   <th className="py-3 px-4 text-right">Unit Price</th>
                   <th className="py-3 px-4 text-right">Valuation</th>
                   <th className="py-3 px-4 text-right">Action</th>
@@ -624,7 +781,7 @@ export default function StockPageClient() {
                         {p.category}
                       </td>
 
-                      {/* Current Stock */}
+                      {/* Current / Branch Stock */}
                       <td className="py-3 px-4 text-center">
                         <span
                           className={`inline-flex items-center font-extrabold text-sm font-mono px-2.5 py-0.5 rounded-[4px] ${
@@ -637,7 +794,7 @@ export default function StockPageClient() {
                               : "bg-emerald-50 text-emerald-700"
                           }`}
                         >
-                          {p.stock}
+                          {p.effectiveStock} units
                         </span>
                       </td>
 
@@ -674,13 +831,33 @@ export default function StockPageClient() {
                         )}
                       </td>
 
+                      {/* Branch Breakdown (in Consolidated View) */}
+                      {selectedBranchFilter === "all" && (
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1 flex-wrap max-w-[200px] mx-auto">
+                            {p.branchBreakdown.map((b) => (
+                              <span
+                                key={b.branchId}
+                                title={`${b.branchName}: ${b.qty} units`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] bg-slate-100 border border-slate-200 text-[10px] font-mono text-slate-700"
+                              >
+                                <span className="text-slate-400 font-sans truncate max-w-[55px]">
+                                  {b.branchName.slice(0, 6)}:
+                                </span>
+                                <span className="font-bold text-blue-700">{b.qty}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      )}
+
                       {/* Unit Price */}
                       <td className="py-3 px-4 text-right font-medium text-slate-600 text-xs">
                         ₹ {p.price.toFixed(2)}
                       </td>
 
                       {/* Total Valuation */}
-                      <td className="py-3 px-4 text-right font-extrabold text-slate-900 text-xs">
+                      <td className="py-3 px-4 text-right font-extrabold text-slate-900 text-xs font-mono">
                         ₹ {p.stockValuation.toFixed(2)}
                       </td>
 
@@ -692,7 +869,7 @@ export default function StockPageClient() {
                           className="h-[30px] px-2.5 inline-flex items-center gap-1 rounded-[5px] bg-slate-100 hover:bg-blue-50 hover:text-blue-600 border border-slate-200 text-slate-700 text-[11px] font-bold transition-colors cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
-                          <span>Adjust Stock</span>
+                          <span>Adjust</span>
                         </button>
                       </td>
                     </tr>
@@ -732,12 +909,29 @@ export default function StockPageClient() {
 
             {/* Form */}
             <form onSubmit={handleSaveStockAdjustment} className="p-5 space-y-4 text-xs">
+              {/* Branch Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Target Store Branch <span className="text-red-500">*</span>
+                </label>
+                <CustomSelect
+                  value={adjustBranchId}
+                  onChange={(val) => setAdjustBranchId(val)}
+                  options={branches.map((b) => ({
+                    value: b.id,
+                    label: b.name,
+                  }))}
+                  searchable={true}
+                  className="w-full"
+                />
+              </div>
+
               {/* Product Info Banner */}
               <div className="p-3 rounded-[6px] bg-slate-50 border border-slate-200 flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] text-slate-500 font-semibold">Current Stock</p>
+                  <p className="text-[11px] text-slate-500 font-semibold">Branch Stock</p>
                   <p className="text-xl font-extrabold text-slate-900 font-mono">
-                    {adjustingProduct.stock} units
+                    {branchStockMap[`${adjustingProduct.id}_${adjustBranchId}`] || 0} units
                   </p>
                 </div>
                 <div className="text-right">
@@ -763,7 +957,7 @@ export default function StockPageClient() {
                         : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    + Add to Current Stock
+                    + Add to Branch Stock
                   </button>
                   <button
                     type="button"
@@ -774,7 +968,7 @@ export default function StockPageClient() {
                         : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    = Set Exact New Stock
+                    = Set Exact Branch Stock
                   </button>
                 </div>
               </div>
@@ -782,7 +976,7 @@ export default function StockPageClient() {
               {/* Quantity Input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {adjustmentType === "add" ? "Quantity to Add (Restock)" : "New Total Stock Count"} <span className="text-red-500">*</span>
+                  {adjustmentType === "add" ? "Quantity to Add (Restock)" : "New Branch Stock Count"} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
@@ -831,7 +1025,7 @@ export default function StockPageClient() {
                   ) : (
                     <Check className="w-4 h-4" />
                   )}
-                  <span>Save Stock</span>
+                  <span>Save Branch Stock</span>
                 </button>
               </div>
             </form>
