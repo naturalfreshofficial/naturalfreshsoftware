@@ -27,6 +27,7 @@ import {
   AlertCircle,
   ShieldCheck,
   Check,
+  Monitor,
 } from "lucide-react";
 
 type SettingsTab = "business" | "gst" | "printer";
@@ -40,9 +41,14 @@ export default function SettingsPageClient() {
     isConnecting,
     isPrinting,
     settings,
+    qzPrintersList,
+    selectedQZPrinter,
+    setSelectedQZPrinter,
     updateSettings,
     connectUSB,
     connectBluetooth,
+    connectQZTray,
+    fetchQZPrinters,
     disconnect,
     printTestReceipt,
     isWebUsbSupported,
@@ -72,6 +78,7 @@ export default function SettingsPageClient() {
     // Printer Settings
     paperWidth: settings.paperWidth || 58,
     autoPrintOnSale: settings.autoPrintOnSale || false,
+    qzPrinterName: settings.qzPrinterName || "",
   });
 
   // Sync formData when settings load from Firestore
@@ -89,6 +96,7 @@ export default function SettingsPageClient() {
       sgstPercent: settings.sgstPercent !== undefined ? settings.sgstPercent : 2.5,
       paperWidth: settings.paperWidth || 58,
       autoPrintOnSale: settings.autoPrintOnSale || false,
+      qzPrinterName: settings.qzPrinterName || "",
     });
   }, [settings]);
 
@@ -122,7 +130,7 @@ export default function SettingsPageClient() {
               Settings & Store Configuration
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Manage your business profile, GST tax rates, and thermal receipt printer hardware.
+              Manage your business profile, receipt details, GST tax rates, and thermal printer hardware.
             </p>
           </div>
         </div>
@@ -137,7 +145,7 @@ export default function SettingsPageClient() {
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-xs font-medium">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-xs font-medium">
               <span className="w-2 h-2 rounded-full bg-slate-400" />
               <span>Thermal Printer: Offline</span>
             </div>
@@ -188,7 +196,7 @@ export default function SettingsPageClient() {
           }`}
         >
           <Printer className="w-4 h-4" />
-          <span>3. Thermal Printer</span>
+          <span>3. Thermal Printer (USB / QZ Tray / BT)</span>
           {isConnected && (
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
           )}
@@ -200,104 +208,117 @@ export default function SettingsPageClient() {
       {/* ========================================================================= */}
       {activeTab === "business" && (
         <form onSubmit={handleSave} className="space-y-6">
-          <div className="bg-white rounded-[8px] border border-slate-200 p-5 lg:p-6 shadow-xs space-y-6">
+          <div className="bg-white rounded-[8px] border border-slate-200 p-5 sm:p-6 shadow-xs space-y-6">
             <div className="border-b border-slate-100 pb-3">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Store className="w-4 h-4 text-blue-600" />
-                <span>Store Profile & Branding</span>
+              <h2 className="text-sm font-bold text-slate-900">
+                Business & Receipt Profile
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                These business details appear on customer invoices, billing receipts, and thermal printouts.
+                These details will appear automatically at the top and bottom of all printed thermal and digital POS customer bills.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
-              {/* Store Name */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Store Name / Business Name */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Store / Business Name <span className="text-red-500">*</span>
+                  Business / Store Name <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.storeName}
-                  onChange={(e) => setFormData({ ...formData, storeName: e.target.value })}
-                  placeholder="e.g. NATURAL FRESH OFFICIAL"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={formData.storeName}
+                    onChange={(e) => setFormData({ ...formData, storeName: e.target.value })}
+                    placeholder="e.g. NATURAL FRESH"
+                    className="w-full h-[40px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <Store className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                </div>
               </div>
 
-              {/* Tagline / Subtitle */}
+              {/* Tagline */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Tagline / Brand Subtitle
+                  Tagline / Sub-heading
                 </label>
-                <input
-                  type="text"
-                  value={formData.tagline}
-                  onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
-                  placeholder="e.g. 100% Pure Naturals & Fresh Delight"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formData.tagline}
+                    onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
+                    placeholder="e.g. Pure Naturals & Fresh Delight"
+                    className="w-full h-[40px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <Sparkles className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                </div>
               </div>
 
-              {/* Phone Number */}
+              {/* Store Mobile Number */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Support / Store Mobile Number</span>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Primary Mobile / Contact Number <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={formData.storePhone}
-                  onChange={(e) => setFormData({ ...formData, storePhone: e.target.value })}
-                  placeholder="e.g. +91 93986 38314"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                />
+                <div className="relative">
+                  <input
+                    type="tel"
+                    required
+                    value={formData.storePhone}
+                    onChange={(e) => setFormData({ ...formData, storePhone: e.target.value })}
+                    placeholder="e.g. 9398638314"
+                    className="w-full h-[40px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <Phone className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                </div>
               </div>
 
-              {/* Email Address */}
+              {/* Store Email */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Mail className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Official Business Email</span>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Contact Email
                 </label>
-                <input
-                  type="email"
-                  value={formData.storeEmail}
-                  onChange={(e) => setFormData({ ...formData, storeEmail: e.target.value })}
-                  placeholder="e.g. contact@naturalfresh.com"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={formData.storeEmail}
+                    onChange={(e) => setFormData({ ...formData, storeEmail: e.target.value })}
+                    placeholder="e.g. contact@naturalfresh.com"
+                    className="w-full h-[40px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                </div>
               </div>
 
               {/* Store Address */}
               <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Store Street Address</span>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Store Address <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={formData.storeAddress}
-                  onChange={(e) => setFormData({ ...formData, storeAddress: e.target.value })}
-                  placeholder="e.g. 4/1 Brodipet, Near Main Road, Guntur, Andhra Pradesh - 522002"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={formData.storeAddress}
+                    onChange={(e) => setFormData({ ...formData, storeAddress: e.target.value })}
+                    placeholder="e.g. Main Road, Beside State Bank, Guntur, Andhra Pradesh - 522002"
+                    className="w-full h-[40px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                </div>
               </div>
 
-              {/* Receipt Footer Message */}
+              {/* Receipt Footer Message / Thank you message */}
               <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                  <Receipt className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Receipt Footer Note / Greetings</span>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Receipt Footer / Thank You Message</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Printed at the very bottom of every bill</span>
                 </label>
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={formData.footerMessage}
                   onChange={(e) => setFormData({ ...formData, footerMessage: e.target.value })}
-                  placeholder="e.g. Thank you for visiting Natural Fresh! Please visit again!"
-                  className="w-full h-[40px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                  placeholder="e.g. Thank you for visiting! Please visit again!"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
                 />
               </div>
             </div>
@@ -314,7 +335,7 @@ export default function SettingsPageClient() {
                 ) : (
                   <Save className="w-4 h-4" />
                 )}
-                <span>Save Business Details</span>
+                <span>Save Business Profile</span>
               </button>
             </div>
           </div>
@@ -322,61 +343,49 @@ export default function SettingsPageClient() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: GST & TAX CONFIGURATION */}
+      {/* TAB 2: GST & TAX SETUP */}
       {/* ========================================================================= */}
       {activeTab === "gst" && (
         <form onSubmit={handleSave} className="space-y-6">
-          <div className="bg-white rounded-[8px] border border-slate-200 p-5 lg:p-6 shadow-xs space-y-6">
-            <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="bg-white rounded-[8px] border border-slate-200 p-5 sm:p-6 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
-                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Percent className="w-4 h-4 text-blue-600" />
-                  <span>GST (Goods & Services Tax) Configuration</span>
+                <h2 className="text-sm font-bold text-slate-900">
+                  Goods & Services Tax (GST) Settings
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Enable GST to automatically apply CGST and SGST percentages on POS billing receipts.
+                  Configure CGST, SGST, and GSTIN number for standard tax billing.
                 </p>
               </div>
 
-              {/* Enable / Disable Toggle Switch */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-bold text-slate-700">
-                  {formData.enableGst ? "GST Enabled" : "GST Disabled"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, enableGst: !formData.enableGst })}
-                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+              {/* GST Enabled Toggle */}
+              <label className="flex items-center gap-3 cursor-pointer select-none bg-slate-50 px-3.5 py-2 rounded-[8px] border border-slate-200">
+                <input
+                  type="checkbox"
+                  checked={formData.enableGst}
+                  onChange={(e) => setFormData({ ...formData, enableGst: e.target.checked })}
+                  className="sr-only"
+                />
+                <div
+                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
                     formData.enableGst ? "bg-emerald-600" : "bg-slate-300"
                   }`}
                 >
                   <div
                     className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      formData.enableGst ? "translate-x-6" : "translate-x-0"
+                      formData.enableGst ? "translate-x-5" : "translate-x-0"
                     }`}
                   />
-                </button>
-              </div>
+                </div>
+                <span className="text-xs font-bold text-slate-800">
+                  {formData.enableGst ? "GST Billing: Enabled" : "GST Billing: Disabled"}
+                </span>
+              </label>
             </div>
 
-            {/* If GST is Disabled */}
-            {!formData.enableGst ? (
-              <div className="p-5 bg-amber-50/70 border border-amber-200 rounded-[8px] flex items-start gap-3.5">
-                <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-amber-900">GST Billing is Currently Turned Off</h3>
-                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                    When GST is disabled, POS bills and thermal printouts will show product prices directly without separate CGST and SGST tax line items.
-                    To collect and print GST on bills, toggle the switch above to <strong>&quot;GST Enabled&quot;</strong>.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              /* If GST is Enabled */
-              <div className="space-y-6 animate-in fade-in duration-200">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+            {formData.enableGst && (
+              <div className="space-y-4 animate-in fade-in duration-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* GST Number (GSTIN) */}
                   <div className="md:col-span-3">
                     <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
@@ -456,38 +465,6 @@ export default function SettingsPageClient() {
                     </div>
                   </div>
                 </div>
-
-                {/* Calculation Example Card */}
-                <div className="p-4 bg-slate-50 rounded-[8px] border border-slate-200 space-y-2">
-                  <p className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <Calculator className="w-4 h-4 text-blue-600" />
-                    <span>Live Tax Calculation Preview (On a ₹100.00 Item)</span>
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
-                    <div className="p-2 bg-white rounded border border-slate-200">
-                      <p className="text-[10px] text-slate-400">Subtotal</p>
-                      <p className="font-bold text-slate-800 font-mono">₹ 100.00</p>
-                    </div>
-                    <div className="p-2 bg-white rounded border border-slate-200">
-                      <p className="text-[10px] text-slate-400">CGST ({formData.cgstPercent}%)</p>
-                      <p className="font-bold text-blue-600 font-mono">
-                        ₹ {((100 * formData.cgstPercent) / 100).toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="p-2 bg-white rounded border border-slate-200">
-                      <p className="text-[10px] text-slate-400">SGST ({formData.sgstPercent}%)</p>
-                      <p className="font-bold text-blue-600 font-mono">
-                        ₹ {((100 * formData.sgstPercent) / 100).toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="p-2 bg-emerald-50 rounded border border-emerald-200">
-                      <p className="text-[10px] text-emerald-700 font-bold">Total Bill</p>
-                      <p className="font-extrabold text-emerald-700 font-mono">
-                        ₹ {(100 + (100 * totalGstPercent) / 100).toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -511,7 +488,7 @@ export default function SettingsPageClient() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: THERMAL PRINTER HARDWARE */}
+      {/* TAB 3: THERMAL PRINTER HARDWARE (USB / QZ TRAY / BLUETOOTH) */}
       {/* ========================================================================= */}
       {activeTab === "printer" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -528,7 +505,7 @@ export default function SettingsPageClient() {
                       Hardware Connection Center
                     </h2>
                     <p className="text-[11px] text-slate-500">
-                      Connect your POS receipt printer directly via driverless WebUSB or Bluetooth.
+                      Connect your thermal printer via USB QZ Tray, WebUSB, or Bluetooth.
                     </p>
                   </div>
                 </div>
@@ -544,30 +521,74 @@ export default function SettingsPageClient() {
                 )}
               </div>
 
-              {/* 2 Connect Action Cards: USB & Bluetooth */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Option 1: WebUSB */}
+              {/* 3 Connection Options: USB QZ Tray, WebUSB, Bluetooth */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                {/* Option 1: USB QZ Tray (Recommended for Windows) */}
                 <div
-                  className={`p-4 rounded-[8px] border transition-all flex flex-col justify-between gap-4 ${
-                    isConnected && connectionType === "usb"
-                      ? "border-emerald-500 bg-emerald-50/20 ring-2 ring-emerald-500/20"
-                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
+                    isConnected && connectionType === "qz_tray"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
+                      : "border-purple-200 bg-purple-50/20 hover:border-purple-300"
                   }`}
                 >
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <div className="w-9 h-9 rounded-[6px] bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                        <Usb className="w-4 h-4" />
+                      <div className="w-8 h-8 rounded-[6px] bg-purple-600 text-white flex items-center justify-center shadow-xs">
+                        <Monitor className="w-4 h-4" />
                       </div>
-                      {isConnected && connectionType === "usb" && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                          Active USB
+                      {isConnected && connectionType === "qz_tray" ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-extrabold">
+                          QZ Tray
                         </span>
                       )}
                     </div>
-                    <h3 className="text-xs font-bold text-slate-900">USB Cable Connection</h3>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Connect desktop/laptop thermal printers directly using a USB cable.
+                    <h3 className="text-xs font-bold text-slate-900">USB QZ Tray</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Silent instant printing via desktop QZ Tray utility.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => connectQZTray()}
+                    disabled={isConnecting || isPrinting}
+                    className="w-full h-[34px] bg-purple-600 hover:bg-purple-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {isConnecting && connectionType === "qz_tray" ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Monitor className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isConnected && connectionType === "qz_tray" ? "Reconnect QZ" : "Connect QZ"}</span>
+                  </button>
+                </div>
+
+                {/* Option 2: Direct WebUSB */}
+                <div
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
+                    isConnected && connectionType === "usb"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                        <Usb className="w-4 h-4" />
+                      </div>
+                      {isConnected && connectionType === "usb" && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-xs font-bold text-slate-900">Direct WebUSB</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Direct browser USB connection (Chrome / Edge).
                     </p>
                   </div>
 
@@ -575,39 +596,39 @@ export default function SettingsPageClient() {
                     type="button"
                     onClick={connectUSB}
                     disabled={isConnecting || isPrinting}
-                    className="w-full h-[38px] bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-[6px] text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    className="w-full h-[34px] bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {isConnecting && connectionType === "usb" ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <Usb className="w-4 h-4" />
+                      <Usb className="w-3.5 h-3.5" />
                     )}
-                    <span>{isConnected && connectionType === "usb" ? "Reconnect USB" : "Pair USB Printer"}</span>
+                    <span>{isConnected && connectionType === "usb" ? "Reconnect" : "Pair USB"}</span>
                   </button>
                 </div>
 
-                {/* Option 2: Web Bluetooth */}
+                {/* Option 3: Web Bluetooth */}
                 <div
-                  className={`p-4 rounded-[8px] border transition-all flex flex-col justify-between gap-4 ${
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
                     isConnected && connectionType === "bluetooth"
-                      ? "border-emerald-500 bg-emerald-50/20 ring-2 ring-emerald-500/20"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
                       : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
                   }`}
                 >
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <div className="w-9 h-9 rounded-[6px] bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                      <div className="w-8 h-8 rounded-[6px] bg-indigo-600 text-white flex items-center justify-center shadow-xs">
                         <Bluetooth className="w-4 h-4" />
                       </div>
                       {isConnected && connectionType === "bluetooth" && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                          Active BLE
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active
                         </span>
                       )}
                     </div>
-                    <h3 className="text-xs font-bold text-slate-900">Bluetooth Wireless</h3>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Pair wireless mobile thermal printers (MPT-II, ESC/POS, Sunmi).
+                    <h3 className="text-xs font-bold text-slate-900">Bluetooth</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Pair wireless mobile thermal printers (MPT-II, ESC/POS).
                     </p>
                   </div>
 
@@ -615,17 +636,59 @@ export default function SettingsPageClient() {
                     type="button"
                     onClick={connectBluetooth}
                     disabled={isConnecting || isPrinting}
-                    className="w-full h-[38px] bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-[6px] text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    className="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
                   >
                     {isConnecting && connectionType === "bluetooth" ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <Bluetooth className="w-4 h-4" />
+                      <Bluetooth className="w-3.5 h-3.5" />
                     )}
-                    <span>{isConnected && connectionType === "bluetooth" ? "Reconnect Bluetooth" : "Pair Bluetooth"}</span>
+                    <span>{isConnected && connectionType === "bluetooth" ? "Reconnect" : "Pair BT"}</span>
                   </button>
                 </div>
               </div>
+
+              {/* QZ Tray Installed Printer Selector (when QZ Tray is connected or active) */}
+              {(connectionType === "qz_tray" || qzPrintersList.length > 0) && (
+                <div className="p-3.5 bg-purple-50/60 rounded-[8px] border border-purple-200 space-y-2 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                      <Monitor className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Select Installed USB / Thermal Printer (QZ Tray)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={fetchQZPrinters}
+                      className="text-[11px] text-purple-700 font-bold hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Refresh Printers</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedQZPrinter || formData.qzPrinterName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedQZPrinter(val);
+                        setFormData({ ...formData, qzPrinterName: val });
+                        updateSettings({ qzPrinterName: val });
+                      }}
+                      className="flex-1 h-[36px] px-3 bg-white border border-purple-300 rounded-[6px] text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                    >
+                      {qzPrintersList.length === 0 ? (
+                        <option value="">No printers detected. Click Refresh.</option>
+                      ) : (
+                        qzPrintersList.map((pr) => (
+                          <option key={pr} value={pr}>
+                            🖨️ {pr}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Hardware Test Action */}
               <div className="p-4 bg-slate-50 rounded-[8px] border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -738,11 +801,11 @@ export default function SettingsPageClient() {
                 </span>
               </div>
 
-              {/* Thermal Paper Look-alike Container */}
+              {/* Thermal Paper Container */}
               <div className="bg-amber-50/40 p-4 rounded-[6px] border border-dashed border-amber-300 font-mono text-[11px] text-slate-800 space-y-2 shadow-inner">
                 {/* Header */}
                 <div className="text-center space-y-0.5 border-b border-dashed border-slate-300 pb-2">
-                  <p className="font-extrabold text-xs text-slate-900 uppercase">{formData.storeName || "NATURAL FRESH"}</p>
+                  <p className="font-extrabold text-sm text-slate-900 uppercase">{formData.storeName || "NATURAL FRESH"}</p>
                   <p className="text-[10px] text-slate-600">{formData.tagline || "Pure Naturals & Fresh Delight"}</p>
                   <p className="text-[10px] text-slate-600">{formData.storeAddress || "Guntur, Andhra Pradesh"}</p>
                   <p className="text-[10px] text-slate-600">Ph: {formData.storePhone || "9398638314"}</p>
@@ -753,22 +816,22 @@ export default function SettingsPageClient() {
 
                 {/* Metadata */}
                 <div className="flex justify-between text-[10px] text-slate-600 border-b border-dashed border-slate-300 pb-1.5">
-                  <span>Inv: INV-20260822-1001</span>
-                  <span>{new Date().toLocaleDateString()}</span>
+                  <span>Bill No: INV-20260822-1001</span>
+                  <span>{new Date().toLocaleDateString("en-IN")}</span>
                 </div>
 
                 {/* Items */}
                 <div className="space-y-1 py-1 border-b border-dashed border-slate-300 text-[10px]">
                   <div className="flex justify-between font-bold text-slate-900">
                     <span>ITEM</span>
-                    <span>QTY  PRICE  AMT</span>
+                    <span>QTY  PRICE  TOTAL</span>
                   </div>
                   <div className="flex justify-between text-slate-700">
-                    <span className="truncate max-w-[120px]">Sitaphal 500ml</span>
+                    <span className="truncate max-w-[120px]">Sitaphal (500ml)</span>
                     <span>1  120.00 120.00</span>
                   </div>
                   <div className="flex justify-between text-slate-700">
-                    <span className="truncate max-w-[120px]">Tender Coconut</span>
+                    <span className="truncate max-w-[120px]">Dark Chocolate (Double)</span>
                     <span>2   90.00 180.00</span>
                   </div>
                 </div>
@@ -789,10 +852,14 @@ export default function SettingsPageClient() {
                         <span>SGST ({formData.sgstPercent}%):</span>
                         <span>₹ {((300 * formData.sgstPercent) / 100).toFixed(2)}</span>
                       </div>
+                      <div className="flex justify-between font-semibold text-slate-800">
+                        <span>Total GST ({totalGstPercent}%):</span>
+                        <span>₹ {((300 * totalGstPercent) / 100).toFixed(2)}</span>
+                      </div>
                     </>
                   ) : null}
                   <div className="flex justify-between font-extrabold text-xs text-slate-900 pt-1 border-t border-slate-300">
-                    <span>TOTAL PAYABLE:</span>
+                    <span>GRAND TOTAL:</span>
                     <span>₹ {(300 + (300 * totalGstPercent) / 100).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-[10px]">

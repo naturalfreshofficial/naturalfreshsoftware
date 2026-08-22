@@ -5,7 +5,11 @@ export interface ReceiptOptions {
   storeName?: string;
   storeAddress?: string;
   storePhone?: string;
+  storeEmail?: string;
   storeGst?: string;
+  enableGst?: boolean;
+  cgstPercent?: number;
+  sgstPercent?: number;
   footerMessage?: string;
 }
 
@@ -133,16 +137,15 @@ export class EscPosBuilder {
 
     if (this.cols === 32) {
       // 58mm Paper (32 columns total):
-      // Format:
-      // Line 1: Item Name (wrap if needed)
-      // Line 2: "  Qty: X  @ Price" -> Right aligned Total
+      // Line 1: Item Name (bold)
+      // Line 2: "  Qty x Rate" -> Right aligned Total
       this.align("left").bold(true).textLn(name).bold(false);
-      const detailLeft = `  ${qtyStr} x ${priceStr}`;
-      const spaces = Math.max(1, this.cols - detailLeft.length - totalStr.length);
-      this.textLn(detailLeft + " ".repeat(spaces) + totalStr);
+      const detailLeft = `  ${qtyStr} x Rs.${priceStr}`;
+      const rightVal = `Rs.${totalStr}`;
+      const spaces = Math.max(1, this.cols - detailLeft.length - rightVal.length);
+      this.textLn(detailLeft + " ".repeat(spaces) + rightVal);
     } else {
       // 80mm Paper (48 columns total):
-      // Col 1 (Item): 22 chars, Col 2 (Qty): 5 chars, Col 3 (Price): 10 chars, Col 4 (Total): 11 chars
       const colItem = 22;
       const colQty = 5;
       const colPrice = 10;
@@ -150,8 +153,8 @@ export class EscPosBuilder {
 
       const itemShort = name.length > colItem ? name.substring(0, colItem - 1) + "." : name.padEnd(colItem);
       const qtyPadded = qtyStr.padStart(colQty);
-      const pricePadded = priceStr.padStart(colPrice);
-      const totalPadded = totalStr.padStart(colTotal);
+      const pricePadded = `Rs.${priceStr}`.padStart(colPrice);
+      const totalPadded = `Rs.${totalStr}`.padStart(colTotal);
 
       this.align("left").textLn(`${itemShort}${qtyPadded}${pricePadded}${totalPadded}`);
     }
@@ -170,7 +173,6 @@ export class EscPosBuilder {
   }
 
   public build(): Uint8Array {
-    // Calculate total buffer length
     const totalLen = this.chunks.reduce((acc, c) => acc + c.length, 0);
     const buffer = new Uint8Array(totalLen);
     let offset = 0;
@@ -183,7 +185,7 @@ export class EscPosBuilder {
 }
 
 /**
- * Generate ESC/POS receipt byte buffer for an invoice
+ * Generate ESC/POS receipt byte buffer for an invoice strictly formatted with settings details
  */
 export function generateInvoiceReceiptBytes(
   invoice: Invoice,
@@ -192,35 +194,55 @@ export function generateInvoiceReceiptBytes(
   const width = options.paperWidth || 58;
   const builder = new EscPosBuilder(width);
 
-  const storeName = options.storeName || "NATURAL FRESH";
-  const branchName = invoice.branchName || "Main Store";
-  const address = options.storeAddress || "Guntur, Andhra Pradesh";
-  const phone = options.storePhone || "9398638314";
-  const gstin = options.storeGst || "37AAAAA0000A1Z5";
-  const footer = options.footerMessage || "Thank you for visiting! Visit Again!";
+  // Business Profile Details from Settings
+  const storeName = (options.storeName || "NATURAL FRESH").trim();
+  const address = (options.storeAddress || "Guntur, Andhra Pradesh").trim();
+  const phone = (options.storePhone || "").trim();
+  const gstin = (options.storeGst || "").trim();
+  const isGst = options.enableGst !== false;
+  const footer = (options.footerMessage || "Thank you for visiting! Please visit again!").trim();
+  const branchName = (invoice.branchName || "Main Store").trim();
 
-  // 1. Header
+  // 1. Header: Business Name & Address
   builder
     .align("center")
     .size("double-both")
     .bold(true)
     .textLn(storeName)
     .size("normal")
-    .bold(false)
-    .textLn(`Outlet: ${branchName}`)
-    .textLn(address)
-    .textLn(`Ph: ${phone}`)
-    .textLn(`GSTIN: ${gstin}`)
-    .doubleDivider();
+    .bold(false);
 
-  // 2. Invoice Details
+  if (branchName && branchName.toLowerCase() !== storeName.toLowerCase()) {
+    builder.textLn(`Outlet: ${branchName}`);
+  }
+  if (address) {
+    builder.textLn(address);
+  }
+  if (phone) {
+    builder.textLn(`Phone: ${phone}`);
+  }
+  if (isGst && gstin) {
+    builder.textLn(`GSTIN: ${gstin}`);
+  }
+
+  builder.doubleDivider();
+
+  // 2. Bill Number, Date & Time
   const invoiceDate = invoice.createdAt?.toDate
     ? invoice.createdAt.toDate()
+    : invoice.createdAt instanceof Date
+    ? invoice.createdAt
     : new Date();
-  const dateStr = invoiceDate.toLocaleDateString("en-IN");
+  
+  const dateStr = invoiceDate.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
   const timeStr = invoiceDate.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
   });
 
   builder
@@ -240,30 +262,33 @@ export function generateInvoiceReceiptBytes(
   if (width === 80) {
     builder
       .bold(true)
-      .textLn("Item                  Qty     Rate      Total")
+      .textLn("Item Description       Qty     Price       Total")
       .bold(false)
       .divider();
   } else {
     builder
       .bold(true)
-      .textLn("Items Description / Qty / Total")
+      .textLn("Item / Qty / Price / Total")
       .bold(false)
       .divider();
   }
 
-  // 4. Items List
+  // 4. Items List: Item name (with variant if any), Qty, Price, Total
   if (invoice.items && invoice.items.length > 0) {
     invoice.items.forEach((item) => {
-      builder.itemRow(item.name, item.quantity, item.price, item.total);
+      const displayName = item.variantName
+        ? `${item.name} (${item.variantName})`
+        : item.name;
+      builder.itemRow(displayName, item.quantity, item.price, item.total);
     });
   }
 
   builder.divider();
 
-  // 5. Calculations Breakdown
-  builder.twoColumns("Item Count / Qty:", `${invoice.items?.length || 0} items`);
-  builder.twoColumns("Subtotal:", `Rs. ${Number(invoice.subtotal).toFixed(2)}`);
+  // 5. Subtotal
+  builder.twoColumns("Subtotal:", `Rs. ${Number(invoice.subtotal).toFixed(2)}`, true);
 
+  // 6. Discount
   if (invoice.discountAmount && Number(invoice.discountAmount) > 0) {
     builder.twoColumns(
       `Discount (${invoice.discountPercent}%):`,
@@ -271,20 +296,26 @@ export function generateInvoiceReceiptBytes(
     );
   }
 
-  if (invoice.taxAmount && Number(invoice.taxAmount) > 0) {
-    builder.twoColumns(
-      `GST Tax (${invoice.taxPercent || 5}%):`,
-      `Rs. ${Number(invoice.taxAmount).toFixed(2)}`
-    );
+  // 7. GST Breakdown
+  if (isGst && invoice.taxAmount && Number(invoice.taxAmount) > 0) {
+    const cgstRate = invoice.cgstPercent ?? options.cgstPercent ?? 2.5;
+    const sgstRate = invoice.sgstPercent ?? options.sgstPercent ?? 2.5;
+    const cgstAmt = invoice.cgstAmount ?? (invoice.taxAmount / 2);
+    const sgstAmt = invoice.sgstAmount ?? (invoice.taxAmount / 2);
+
+    builder
+      .twoColumns(`CGST (${cgstRate}%):`, `Rs. ${Number(cgstAmt).toFixed(2)}`)
+      .twoColumns(`SGST (${sgstRate}%):`, `Rs. ${Number(sgstAmt).toFixed(2)}`)
+      .twoColumns(`Total GST:`, `Rs. ${Number(invoice.taxAmount).toFixed(2)}`);
   }
 
   builder.doubleDivider();
 
-  // 6. Net Total Payable
+  // 8. Grand Total / NET PAYABLE
   builder
     .size("double-height")
     .bold(true)
-    .twoColumns("NET PAYABLE:", `Rs. ${Number(invoice.totalPayable).toFixed(2)}`)
+    .twoColumns("GRAND TOTAL:", `Rs. ${Number(invoice.totalPayable).toFixed(2)}`)
     .size("normal")
     .bold(false);
 
@@ -292,10 +323,15 @@ export function generateInvoiceReceiptBytes(
 
   builder.divider();
 
-  // 7. Footer message
+  // 9. Thank You Message from Settings
+  if (footer) {
+    builder
+      .align("center")
+      .textLn(footer);
+  }
+
   builder
     .align("center")
-    .textLn(footer)
     .textLn("Software by GamaNext")
     .cut();
 
@@ -310,12 +346,13 @@ export function generateTestReceiptBytes(
 ): Uint8Array {
   const width = options.paperWidth || 58;
   const builder = new EscPosBuilder(width);
+  const storeName = (options.storeName || "NATURAL FRESH").trim();
 
   builder
     .align("center")
     .size("double-both")
     .bold(true)
-    .textLn("NATURAL FRESH")
+    .textLn(storeName)
     .size("normal")
     .bold(false)
     .textLn("Thermal Printer Test")
@@ -323,10 +360,11 @@ export function generateTestReceiptBytes(
     .align("left")
     .twoColumns("Connection:", "SUCCESSFUL", true)
     .twoColumns("Paper Mode:", `${width}mm (${builder.getColumns()} cols)`)
-    .twoColumns("Timestamp:", new Date().toLocaleTimeString("en-IN"))
+    .twoColumns("Date & Time:", new Date().toLocaleString("en-IN"))
     .divider()
     .align("center")
     .textLn("Printer is Ready for Fast POS Billing!")
+    .textLn(options.footerMessage || "Thank you for visiting! Please visit again!")
     .doubleDivider()
     .cut();
 

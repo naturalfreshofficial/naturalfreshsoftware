@@ -13,12 +13,12 @@ import {
   generateTestReceiptBytes,
   ReceiptOptions,
 } from "./escpos";
+import { qzTray } from "./qzTray";
 import { useToast } from "@/components/ToastProvider";
-
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-export type PrinterConnectionType = "usb" | "bluetooth" | null;
+export type PrinterConnectionType = "usb" | "bluetooth" | "qz_tray" | null;
 
 export interface PrinterSettings {
   paperWidth: 58 | 80;
@@ -33,6 +33,7 @@ export interface PrinterSettings {
   sgstPercent: number;
   footerMessage: string;
   autoPrintOnSale: boolean;
+  qzPrinterName?: string;
 }
 
 interface PrinterContextType {
@@ -42,9 +43,14 @@ interface PrinterContextType {
   isConnecting: boolean;
   isPrinting: boolean;
   settings: PrinterSettings;
+  qzPrintersList: string[];
+  selectedQZPrinter: string;
+  setSelectedQZPrinter: (name: string) => void;
   updateSettings: (newSettings: Partial<PrinterSettings>) => Promise<void>;
   connectUSB: () => Promise<boolean>;
   connectBluetooth: () => Promise<boolean>;
+  connectQZTray: (targetPrinterName?: string) => Promise<boolean>;
+  fetchQZPrinters: () => Promise<string[]>;
   disconnect: () => Promise<void>;
   printInvoice: (invoice: Invoice, branchName?: string) => Promise<boolean>;
   printTestReceipt: () => Promise<boolean>;
@@ -66,10 +72,10 @@ const DEFAULT_SETTINGS: PrinterSettings = {
   sgstPercent: 2.5,
   footerMessage: "Thank you for visiting! Please visit again!",
   autoPrintOnSale: false,
+  qzPrinterName: "",
 };
 
 const PrinterContext = createContext<PrinterContextType | undefined>(undefined);
-
 
 // Known thermal printer Bluetooth GATT Services & Characteristics
 const BLUETOOTH_SERVICES = [
@@ -100,6 +106,10 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   const [bluetoothDevice, setBluetoothDevice] = useState<any>(null);
   const [bluetoothCharacteristic, setBluetoothCharacteristic] = useState<any>(null);
 
+  // QZ Tray State
+  const [qzPrintersList, setQzPrintersList] = useState<string[]>([]);
+  const [selectedQZPrinter, setSelectedQZPrinter] = useState<string>("");
+
   // Settings State
   const [settings, setSettings] = useState<PrinterSettings>(DEFAULT_SETTINGS);
 
@@ -114,10 +124,14 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const saved = localStorage.getItem("pos_thermal_printer_settings");
       if (saved) {
-        setSettings((prev) => ({ ...prev, ...JSON.parse(saved) }));
+        const parsed = JSON.parse(saved);
+        setSettings((prev) => ({ ...prev, ...parsed }));
+        if (parsed.qzPrinterName) {
+          setSelectedQZPrinter(parsed.qzPrinterName);
+        }
       }
       const savedDevice = localStorage.getItem("pos_thermal_last_device_name");
-      const savedType = localStorage.getItem("pos_thermal_last_connection_type");
+      const savedType = localStorage.getItem("pos_thermal_last_connection_type") as PrinterConnectionType;
       if (savedDevice && savedType) {
         setDeviceName(savedDevice);
       }
@@ -131,6 +145,9 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
         const data = docSnap.data() as Partial<PrinterSettings>;
         setSettings((prev) => {
           const merged = { ...prev, ...data };
+          if (data.qzPrinterName) {
+            setSelectedQZPrinter(data.qzPrinterName);
+          }
           try {
             localStorage.setItem("pos_thermal_printer_settings", JSON.stringify(merged));
           } catch (e) {}
@@ -159,7 +176,6 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [settings, toast]);
 
-
   /**
    * Connect via WebUSB
    */
@@ -171,10 +187,9 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setIsConnecting(true);
     try {
-      // Prompt user to pick USB printer
       const nav: any = navigator;
       const device = await nav.usb.requestDevice({
-        filters: [], // Allow user to select any USB device
+        filters: [],
       });
 
       if (!device) {
@@ -184,19 +199,16 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
 
       await device.open();
 
-      // Select configuration 1 if needed
       if (device.configuration === null) {
         await device.selectConfiguration(1);
       }
 
-      // Find printer interface or interface 0
       let chosenInterface = 0;
       let endpointNum = 1;
 
       if (device.configuration && device.configuration.interfaces) {
         for (const iface of device.configuration.interfaces) {
           for (const alt of iface.alternates) {
-            // Find OUT endpoint for writing data
             const outEndpoint = alt.endpoints.find(
               (ep: any) => ep.direction === "out"
             );
@@ -246,7 +258,6 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsConnecting(true);
     try {
       const nav: any = navigator;
-      // Request Bluetooth device with all standard thermal printer services
       const device = await nav.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: BLUETOOTH_SERVICES,
@@ -262,7 +273,6 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error("Could not connect to Bluetooth GATT server.");
       }
 
-      // Discover primary services and find a writable characteristic
       const services = await server.getPrimaryServices();
       let writeChar: any = null;
 
@@ -278,9 +288,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (!writeChar) {
-        throw new Error(
-          "Could not find a writable data channel on this Bluetooth printer."
-        );
+        throw new Error("Could not find a writable data channel on this Bluetooth printer.");
       }
 
       setBluetoothDevice(device);
@@ -293,7 +301,6 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       localStorage.setItem("pos_thermal_last_device_name", name);
       localStorage.setItem("pos_thermal_last_connection_type", "bluetooth");
 
-      // Handle disconnect event
       device.addEventListener("gattserverdisconnected", () => {
         setIsConnected(false);
         setConnectionType(null);
@@ -314,6 +321,56 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
+   * Connect via USB QZ Tray Desktop Service
+   */
+  const connectQZTray = async (targetPrinterName?: string): Promise<boolean> => {
+    setIsConnecting(true);
+    try {
+      const printers = await qzTray.connect();
+      setQzPrintersList(printers);
+
+      const printerToUse = targetPrinterName || selectedQZPrinter || (printers.length > 0 ? printers[0] : "");
+      if (printerToUse) {
+        setSelectedQZPrinter(printerToUse);
+        qzTray.setActivePrinter(printerToUse);
+      }
+
+      setIsConnected(true);
+      setConnectionType("qz_tray");
+      const name = printerToUse ? `QZ Tray (${printerToUse})` : "QZ Tray";
+      setDeviceName(name);
+
+      localStorage.setItem("pos_thermal_last_device_name", name);
+      localStorage.setItem("pos_thermal_last_connection_type", "qz_tray");
+      if (printerToUse) {
+        await updateSettings({ qzPrinterName: printerToUse });
+      }
+
+      toast.success(`Connected to USB QZ Tray! ${printers.length} installed printers found.`);
+      return true;
+    } catch (err: any) {
+      console.error("QZ Tray connect error:", err);
+      toast.error(err.message || "Failed to connect to QZ Tray");
+      return false;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  /**
+   * Fetch installed printers list from QZ Tray
+   */
+  const fetchQZPrinters = async (): Promise<string[]> => {
+    try {
+      const printers = await qzTray.findPrinters();
+      setQzPrintersList(printers);
+      return printers;
+    } catch (e) {
+      return [];
+    }
+  };
+
+  /**
    * Disconnect Active Printer
    */
   const disconnect = async () => {
@@ -322,6 +379,8 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
         await usbDevice.close();
       } else if (connectionType === "bluetooth" && bluetoothDevice?.gatt?.connected) {
         bluetoothDevice.gatt.disconnect();
+      } else if (connectionType === "qz_tray") {
+        qzTray.disconnect();
       }
     } catch (e) {
       console.warn("Error during disconnect:", e);
@@ -336,21 +395,21 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
-   * Send Raw ESC/POS byte buffer to the active printer (chunked for Bluetooth)
+   * Send Raw ESC/POS byte buffer to the active printer (USB / Bluetooth / QZ Tray)
    */
   const printRawBytes = async (bytes: Uint8Array): Promise<boolean> => {
     if (!isConnected) {
-      toast.error("No thermal printer connected. Please connect via USB or Bluetooth in Settings.");
+      toast.error("No thermal printer connected. Please connect via USB, Bluetooth, or QZ Tray in Settings.");
       return false;
     }
 
     setIsPrinting(true);
     try {
       if (connectionType === "usb" && usbDevice) {
-        // Send USB Bulk Transfer
+        // Direct WebUSB bulk transfer
         await usbDevice.transferOut(usbEndpointNumber, bytes);
       } else if (connectionType === "bluetooth" && bluetoothCharacteristic) {
-        // Send chunked Bluetooth data (chunks of 128 bytes with short delay to avoid buffer overflow)
+        // Chunked Web Bluetooth
         const CHUNK_SIZE = 128;
         for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
           const chunk = bytes.slice(i, i + CHUNK_SIZE);
@@ -359,9 +418,15 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
           } else {
             await bluetoothCharacteristic.writeValue(chunk);
           }
-          // Small delay for printer buffer
           await new Promise((res) => setTimeout(res, 20));
         }
+      } else if (connectionType === "qz_tray") {
+        // USB QZ Tray Desktop Service
+        const targetPrinter = selectedQZPrinter || settings.qzPrinterName || (qzPrintersList[0] || "");
+        if (!targetPrinter) {
+          throw new Error("No specific QZ Tray printer selected. Please choose a printer in Settings.");
+        }
+        await qzTray.printRaw(targetPrinter, bytes);
       }
 
       toast.success("Receipt printed successfully!");
@@ -376,7 +441,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
-   * Print Formatted Invoice
+   * Print Formatted Invoice with all configured store details
    */
   const printInvoice = async (
     invoice: Invoice,
@@ -387,7 +452,11 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       storeName: settings.storeName,
       storeAddress: settings.storeAddress,
       storePhone: settings.storePhone,
+      storeEmail: settings.storeEmail,
       storeGst: settings.storeGst,
+      enableGst: settings.enableGst,
+      cgstPercent: settings.cgstPercent,
+      sgstPercent: settings.sgstPercent,
       footerMessage: settings.footerMessage,
     };
 
@@ -405,6 +474,8 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   const printTestReceipt = async (): Promise<boolean> => {
     const bytes = generateTestReceiptBytes({
       paperWidth: settings.paperWidth,
+      storeName: settings.storeName,
+      footerMessage: settings.footerMessage,
     });
     return await printRawBytes(bytes);
   };
@@ -418,9 +489,14 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
         isConnecting,
         isPrinting,
         settings,
+        qzPrintersList,
+        selectedQZPrinter,
+        setSelectedQZPrinter,
         updateSettings,
         connectUSB,
         connectBluetooth,
+        connectQZTray,
+        fetchQZPrinters,
         disconnect,
         printInvoice,
         printTestReceipt,

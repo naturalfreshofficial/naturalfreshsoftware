@@ -2182,29 +2182,53 @@ export default function POSBillingView() {
             </div>
 
             <div id="pos-printable-receipt" className="p-6 space-y-4 text-xs bg-white text-slate-800">
-              <div className="text-center border-b border-dashed border-slate-300 pb-3">
+              <div className="text-center border-b border-dashed border-slate-300 pb-3 space-y-0.5">
                 <div className="w-12 h-12 mx-auto mb-1 rounded-[6px] overflow-hidden">
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                 </div>
-                <h4 className="text-base font-extrabold text-slate-900">NATURAL FRESH</h4>
+                <h4 className="text-base font-extrabold text-slate-900 uppercase">
+                  {printer.settings.storeName || "NATURAL FRESH"}
+                </h4>
+                {printer.settings.tagline && (
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    {printer.settings.tagline}
+                  </p>
+                )}
                 <p className="text-[11px] font-bold text-blue-700">
                   Outlet: {completedInvoice.branchName || selectedBranch?.name || "Main Store"}
                 </p>
-                <p className="text-[11px] text-slate-500">
-                  {selectedBranch?.address || "Guntur, Andhra Pradesh"}
+                <p className="text-[11px] text-slate-600">
+                  {printer.settings.storeAddress || selectedBranch?.address || "Guntur, Andhra Pradesh"}
                 </p>
-                <p className="text-[11px] text-slate-500 font-mono">GSTIN: 37AAAAA0000A1Z5</p>
+                {printer.settings.storePhone && (
+                  <p className="text-[11px] text-slate-600 font-mono">
+                    Ph: {printer.settings.storePhone}
+                  </p>
+                )}
+                {printer.settings.enableGst && printer.settings.storeGst && (
+                  <p className="text-[11px] text-slate-700 font-bold font-mono">
+                    GSTIN: {printer.settings.storeGst}
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center justify-between text-[11px] border-b border-dashed border-slate-300 pb-2">
                 <div>
-                  <p className="font-bold text-slate-900 font-mono">{completedInvoice.invoiceNumber}</p>
-                  <p className="text-slate-500">Date: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
+                  <p className="font-bold text-slate-900 font-mono">
+                    Bill No: {completedInvoice.invoiceNumber}
+                  </p>
+                  <p className="text-slate-500">
+                    Date & Time: {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })} {new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="font-bold text-slate-900">{completedInvoice.customer?.name}</p>
-                  <p className="text-slate-500 font-mono">{completedInvoice.customer?.phone}</p>
-                </div>
+                {completedInvoice.customer?.name && (
+                  <div className="text-right">
+                    <p className="font-bold text-slate-900">{completedInvoice.customer?.name}</p>
+                    {completedInvoice.customer?.phone && (
+                      <p className="text-slate-500 font-mono">{completedInvoice.customer?.phone}</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <table className="w-full text-left text-xs border-collapse">
@@ -2212,17 +2236,19 @@ export default function POSBillingView() {
                   <tr className="border-b border-slate-200 text-slate-500 text-[10px] font-bold uppercase">
                     <th className="py-1.5">Item</th>
                     <th className="py-1.5 text-center">Qty</th>
-                    <th className="py-1.5 text-right">Rate</th>
-                    <th className="py-1.5 text-right">Amount</th>
+                    <th className="py-1.5 text-right">Price</th>
+                    <th className="py-1.5 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11px]">
                   {completedInvoice.items?.map((it, idx) => (
                     <tr key={idx}>
-                      <td className="py-1.5 font-medium text-slate-800">{it.name}</td>
-                      <td className="py-1.5 text-center text-slate-600">{it.quantity}</td>
-                      <td className="py-1.5 text-right text-slate-600">₹{it.price.toFixed(2)}</td>
-                      <td className="py-1.5 text-right font-bold text-slate-900">₹{it.total.toFixed(2)}</td>
+                      <td className="py-1.5 font-medium text-slate-800">
+                        <span>{it.name}</span>
+                      </td>
+                      <td className="py-1.5 text-center text-slate-600 font-mono">{it.quantity}</td>
+                      <td className="py-1.5 text-right text-slate-600 font-mono">₹{it.price.toFixed(2)}</td>
+                      <td className="py-1.5 text-right font-bold text-slate-900 font-mono">₹{it.total.toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2230,22 +2256,41 @@ export default function POSBillingView() {
 
               <div className="border-t border-dashed border-slate-300 pt-2 space-y-1 text-[11px]">
                 <div className="flex justify-between text-slate-600">
-                  <span>Subtotal</span>
-                  <span className="font-semibold">₹ {completedInvoice.subtotal.toFixed(2)}</span>
+                  <span>Subtotal ({completedInvoice.itemCount || completedInvoice.items?.length} items)</span>
+                  <span className="font-semibold font-mono">₹ {completedInvoice.subtotal.toFixed(2)}</span>
                 </div>
+
                 {completedInvoice.discountAmount > 0 && (
                   <div className="flex justify-between text-red-600">
                     <span>Discount ({completedInvoice.discountPercent}%)</span>
-                    <span>- ₹ {completedInvoice.discountAmount.toFixed(2)}</span>
+                    <span className="font-semibold font-mono">- ₹ {completedInvoice.discountAmount.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-slate-600">
-                  <span>GST Tax (5%)</span>
-                  <span className="font-semibold">₹ {completedInvoice.taxAmount.toFixed(2)}</span>
-                </div>
+
+                {isGstEnabled && completedInvoice.taxAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-slate-600">
+                      <span>CGST ({completedInvoice.cgstPercent || (completedInvoice.taxPercent ? completedInvoice.taxPercent / 2 : 2.5)}%)</span>
+                      <span className="font-mono">
+                        ₹ {(completedInvoice.cgstAmount ?? completedInvoice.taxAmount / 2).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>SGST ({completedInvoice.sgstPercent || (completedInvoice.taxPercent ? completedInvoice.taxPercent / 2 : 2.5)}%)</span>
+                      <span className="font-mono">
+                        ₹ {(completedInvoice.sgstAmount ?? completedInvoice.taxAmount / 2).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-700 font-semibold">
+                      <span>Total GST ({completedInvoice.taxPercent || 5}%)</span>
+                      <span className="font-mono">₹ {completedInvoice.taxAmount.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
+
                 <div className="border-t border-slate-200 pt-1.5 flex justify-between text-sm font-extrabold text-slate-950">
-                  <span>Total Amount Paid</span>
-                  <span>₹ {completedInvoice.totalPayable.toFixed(2)}</span>
+                  <span>GRAND TOTAL</span>
+                  <span className="text-blue-600 font-mono">₹ {completedInvoice.totalPayable.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
                   <span>Payment Mode:</span>
@@ -2253,9 +2298,12 @@ export default function POSBillingView() {
                 </div>
               </div>
 
-              <div className="text-center pt-2 text-[10px] text-slate-400 border-t border-dashed border-slate-200">
-                <p>Thank you for shopping with us!</p>
-                <p>Please visit again.</p>
+              {/* Thank you message from Settings */}
+              <div className="text-center pt-2 text-[10px] text-slate-500 border-t border-dashed border-slate-200 space-y-0.5">
+                <p className="font-semibold">
+                  {printer.settings.footerMessage || "Thank you for shopping with us! Please visit again."}
+                </p>
+                <p className="text-[9px] text-slate-400">Software by GamaNext</p>
               </div>
             </div>
 
