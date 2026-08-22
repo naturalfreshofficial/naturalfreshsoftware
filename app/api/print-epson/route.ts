@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { wrapText, getItemDisplayName } from "@/lib/escpos";
+import { wrapText, getReceiptItemName } from "@/lib/escpos";
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,11 +75,11 @@ export async function POST(req: NextRequest) {
         .map((l) => `<text>${escapeXml(l)}&#10;</text>`)
         .join("");
 
-      // Items list with clean formatting and no repeated variant names
+      // Items list with clean formatting and no variation suffix
       let itemsXml = "";
       if (invoice.items && invoice.items.length > 0) {
         invoice.items.forEach((it: any) => {
-          const displayName = getItemDisplayName(it.name, it.variantName);
+          const displayName = getReceiptItemName(it.name);
           const qty = it.quantity;
           const price = Number(it.price).toFixed(2);
           const total = Number(it.total).toFixed(2);

@@ -69,6 +69,15 @@ export function wrapText(text: string, maxLen: number): string[] {
 }
 
 /**
+ * Clean product name for customer receipt / bill without variation strings
+ * e.g. "Tender Coconut (Single Scoop)" -> "Tender Coconut"
+ */
+export function getReceiptItemName(name: string): string {
+  if (!name) return "";
+  return name.replace(/\s*\([^)]*\)/g, "").trim();
+}
+
+/**
  * Clean product & variation display name to ensure no repeated variant names
  */
 export function getItemDisplayName(name: string, variantName?: string): string {
@@ -334,10 +343,10 @@ export function generateInvoiceReceiptBytes(
       .divider();
   }
 
-  // 4. Items List: Clean item name (no duplicates), Qty, Price, Total
+  // 4. Items List: Product name only without variation suffix, Qty, Price, Total
   if (invoice.items && invoice.items.length > 0) {
     invoice.items.forEach((item) => {
-      const displayName = getItemDisplayName(item.name, item.variantName);
+      const displayName = getReceiptItemName(item.name);
       builder.itemRow(displayName, item.quantity, item.price, item.total);
     });
   }

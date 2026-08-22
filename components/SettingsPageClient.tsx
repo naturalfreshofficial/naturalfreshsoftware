@@ -883,11 +883,11 @@ export default function SettingsPageClient() {
                     <span>QTY  PRICE  TOTAL</span>
                   </div>
                   <div className="flex justify-between text-slate-700">
-                    <span className="truncate max-w-[120px]">Sitaphal (500ml)</span>
+                    <span className="truncate max-w-[120px]">Sitaphal</span>
                     <span>1  120.00 120.00</span>
                   </div>
                   <div className="flex justify-between text-slate-700">
-                    <span className="truncate max-w-[120px]">Dark Chocolate (Double)</span>
+                    <span className="truncate max-w-[120px]">Dark Chocolate</span>
                     <span>2   90.00 180.00</span>
                   </div>
                 </div>

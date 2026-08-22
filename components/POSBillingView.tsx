@@ -22,7 +22,7 @@ import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
 import { usePrinter } from "@/lib/PrinterContext";
 import { getItemKgWeight, formatKgStock, getApproximateScoops } from "@/lib/stockUtils";
-import { getItemDisplayName } from "@/lib/escpos";
+import { getItemDisplayName, getReceiptItemName } from "@/lib/escpos";
 import {
   Search,
   LayoutGrid,
@@ -2247,7 +2247,7 @@ export default function POSBillingView() {
                   {completedInvoice.items?.map((it, idx) => (
                     <tr key={idx}>
                       <td className="py-1.5 font-medium text-slate-800">
-                        <span>{getItemDisplayName(it.name, it.variantName)}</span>
+                        <span>{getReceiptItemName(it.name)}</span>
                       </td>
                       <td className="py-1.5 text-center text-slate-600 font-mono">{it.quantity}</td>
                       <td className="py-1.5 text-right text-slate-600 font-mono">₹{it.price.toFixed(2)}</td>
