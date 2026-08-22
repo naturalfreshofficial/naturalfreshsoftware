@@ -70,8 +70,9 @@ export default function Sidebar() {
   });
 
   return (
-    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col h-screen shrink-0 sticky top-0 z-20">
+    <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 flex-col h-screen shrink-0 sticky top-0 z-20">
       {/* Brand Header */}
+
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
         <div className="w-10 h-10 rounded-[6px] bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
           <img
