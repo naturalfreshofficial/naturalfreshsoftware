@@ -28,6 +28,8 @@ import {
   ShieldCheck,
   Check,
   Monitor,
+  Wifi,
+  Globe,
 } from "lucide-react";
 
 type SettingsTab = "business" | "gst" | "printer";
@@ -48,6 +50,7 @@ export default function SettingsPageClient() {
     connectUSB,
     connectBluetooth,
     connectQZTray,
+    connectEpsonNetwork,
     fetchQZPrinters,
     disconnect,
     printTestReceipt,
@@ -79,6 +82,8 @@ export default function SettingsPageClient() {
     paperWidth: settings.paperWidth || 58,
     autoPrintOnSale: settings.autoPrintOnSale || false,
     qzPrinterName: settings.qzPrinterName || "",
+    epsonPrinterIp: settings.epsonPrinterIp || "192.168.1.100",
+    epsonPort: settings.epsonPort || 80,
   });
 
   // Sync formData when settings load from Firestore
@@ -97,6 +102,8 @@ export default function SettingsPageClient() {
       paperWidth: settings.paperWidth || 58,
       autoPrintOnSale: settings.autoPrintOnSale || false,
       qzPrinterName: settings.qzPrinterName || "",
+      epsonPrinterIp: settings.epsonPrinterIp || "192.168.1.100",
+      epsonPort: settings.epsonPort || 80,
     });
   }, [settings]);
 
@@ -130,7 +137,7 @@ export default function SettingsPageClient() {
               Settings & Store Configuration
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Manage your business profile, receipt details, GST tax rates, and thermal printer hardware.
+              Manage your business profile, receipt details, GST tax rates, and Epson/Thermal printer hardware.
             </p>
           </div>
         </div>
@@ -196,7 +203,7 @@ export default function SettingsPageClient() {
           }`}
         >
           <Printer className="w-4 h-4" />
-          <span>3. Thermal Printer (USB / QZ Tray / BT)</span>
+          <span>3. Thermal & Epson Printers</span>
           {isConnected && (
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
           )}
@@ -488,7 +495,7 @@ export default function SettingsPageClient() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: THERMAL PRINTER HARDWARE (USB / QZ TRAY / BLUETOOTH) */}
+      {/* TAB 3: THERMAL & EPSON PRINTER HARDWARE */}
       {/* ========================================================================= */}
       {activeTab === "printer" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -505,7 +512,7 @@ export default function SettingsPageClient() {
                       Hardware Connection Center
                     </h2>
                     <p className="text-[11px] text-slate-500">
-                      Connect your thermal printer via USB QZ Tray, WebUSB, or Bluetooth.
+                      Connect via Direct Epson LAN/Wi-Fi, Direct WebUSB, Bluetooth, or USB QZ Tray.
                     </p>
                   </div>
                 </div>
@@ -521,9 +528,142 @@ export default function SettingsPageClient() {
                 )}
               </div>
 
-              {/* 3 Connection Options: USB QZ Tray, WebUSB, Bluetooth */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                {/* Option 1: USB QZ Tray (Recommended for Windows) */}
+              {/* 4 Connection Options: Epson Network, USB QZ Tray, WebUSB, Bluetooth */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Option 1: Direct Epson Network (Bridge-Free IP) */}
+                <div
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
+                    isConnected && connectionType === "epson_network"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
+                      : "border-blue-200 bg-blue-50/30 hover:border-blue-400"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-[6px] bg-blue-700 text-white flex items-center justify-center shadow-xs">
+                        <Wifi className="w-4 h-4" />
+                      </div>
+                      {isConnected && connectionType === "epson_network" ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active IP
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 text-[9px] font-extrabold">
+                          Epson Direct (No Bridge)
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-xs font-bold text-slate-900">Epson LAN / Wi-Fi (ePOS)</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Direct printing to Epson network IP without drivers or QZ Tray.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="e.g. 192.168.1.100"
+                      value={formData.epsonPrinterIp}
+                      onChange={(e) => setFormData({ ...formData, epsonPrinterIp: e.target.value })}
+                      className="w-full h-[32px] px-2.5 bg-white border border-blue-200 rounded-[5px] text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => connectEpsonNetwork(formData.epsonPrinterIp, formData.epsonPort)}
+                      disabled={isConnecting || isPrinting}
+                      className="w-full h-[34px] bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      {isConnecting && connectionType === "epson_network" ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Wifi className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isConnected && connectionType === "epson_network" ? "Test & Reconnect" : "Connect Epson IP"}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Option 2: Direct WebUSB */}
+                <div
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
+                    isConnected && connectionType === "usb"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-[6px] bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                        <Usb className="w-4 h-4" />
+                      </div>
+                      {isConnected && connectionType === "usb" && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active USB
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-xs font-bold text-slate-900">Direct WebUSB</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Driverless USB cable pairing in Chrome or Edge.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={connectUSB}
+                    disabled={isConnecting || isPrinting}
+                    className="w-full h-[34px] bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {isConnecting && connectionType === "usb" ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Usb className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isConnected && connectionType === "usb" ? "Reconnect USB" : "Pair WebUSB"}</span>
+                  </button>
+                </div>
+
+                {/* Option 3: Bluetooth Wireless */}
+                <div
+                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
+                    isConnected && connectionType === "bluetooth"
+                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
+                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-[6px] bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                        <Bluetooth className="w-4 h-4" />
+                      </div>
+                      {isConnected && connectionType === "bluetooth" && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
+                          Active BLE
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-xs font-bold text-slate-900">Bluetooth Wireless</h3>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Pair wireless mobile thermal printers (MPT-II, ESC/POS).
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={connectBluetooth}
+                    disabled={isConnecting || isPrinting}
+                    className="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {isConnecting && connectionType === "bluetooth" ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Bluetooth className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isConnected && connectionType === "bluetooth" ? "Reconnect" : "Pair Bluetooth"}</span>
+                  </button>
+                </div>
+
+                {/* Option 4: USB QZ Tray Desktop */}
                 <div
                   className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
                     isConnected && connectionType === "qz_tray"
@@ -536,19 +676,15 @@ export default function SettingsPageClient() {
                       <div className="w-8 h-8 rounded-[6px] bg-purple-600 text-white flex items-center justify-center shadow-xs">
                         <Monitor className="w-4 h-4" />
                       </div>
-                      {isConnected && connectionType === "qz_tray" ? (
+                      {isConnected && connectionType === "qz_tray" && (
                         <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-extrabold">
-                          QZ Tray
+                          Active QZ
                         </span>
                       )}
                     </div>
                     <h3 className="text-xs font-bold text-slate-900">USB QZ Tray</h3>
                     <p className="text-[10px] text-slate-500 leading-tight">
-                      Silent instant printing via desktop QZ Tray utility.
+                      Silent desktop utility for legacy Windows printers.
                     </p>
                   </div>
 
@@ -566,89 +702,9 @@ export default function SettingsPageClient() {
                     <span>{isConnected && connectionType === "qz_tray" ? "Reconnect QZ" : "Connect QZ"}</span>
                   </button>
                 </div>
-
-                {/* Option 2: Direct WebUSB */}
-                <div
-                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
-                    isConnected && connectionType === "usb"
-                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
-                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                        <Usb className="w-4 h-4" />
-                      </div>
-                      {isConnected && connectionType === "usb" && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
-                          Active
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-xs font-bold text-slate-900">Direct WebUSB</h3>
-                    <p className="text-[10px] text-slate-500 leading-tight">
-                      Direct browser USB connection (Chrome / Edge).
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={connectUSB}
-                    disabled={isConnecting || isPrinting}
-                    className="w-full h-[34px] bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
-                  >
-                    {isConnecting && connectionType === "usb" ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Usb className="w-3.5 h-3.5" />
-                    )}
-                    <span>{isConnected && connectionType === "usb" ? "Reconnect" : "Pair USB"}</span>
-                  </button>
-                </div>
-
-                {/* Option 3: Web Bluetooth */}
-                <div
-                  className={`p-3.5 rounded-[8px] border transition-all flex flex-col justify-between gap-3 ${
-                    isConnected && connectionType === "bluetooth"
-                      ? "border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20"
-                      : "border-slate-200 bg-slate-50/50 hover:border-slate-300"
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <div className="w-8 h-8 rounded-[6px] bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                        <Bluetooth className="w-4 h-4" />
-                      </div>
-                      {isConnected && connectionType === "bluetooth" && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-bold">
-                          Active
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-xs font-bold text-slate-900">Bluetooth</h3>
-                    <p className="text-[10px] text-slate-500 leading-tight">
-                      Pair wireless mobile thermal printers (MPT-II, ESC/POS).
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={connectBluetooth}
-                    disabled={isConnecting || isPrinting}
-                    className="w-full h-[34px] bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-[6px] text-[11px] font-bold transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
-                  >
-                    {isConnecting && connectionType === "bluetooth" ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Bluetooth className="w-3.5 h-3.5" />
-                    )}
-                    <span>{isConnected && connectionType === "bluetooth" ? "Reconnect" : "Pair BT"}</span>
-                  </button>
-                </div>
               </div>
 
-              {/* QZ Tray Installed Printer Selector (when QZ Tray is connected or active) */}
+              {/* QZ Tray Installed Printer Selector */}
               {(connectionType === "qz_tray" || qzPrintersList.length > 0) && (
                 <div className="p-3.5 bg-purple-50/60 rounded-[8px] border border-purple-200 space-y-2 animate-in fade-in duration-150">
                   <div className="flex items-center justify-between">
@@ -695,7 +751,7 @@ export default function SettingsPageClient() {
                 <div className="space-y-0.5 text-center sm:text-left">
                   <p className="text-xs font-bold text-slate-800">Print Test Receipt</p>
                   <p className="text-[11px] text-slate-500">
-                    Send ESC/POS test commands, formatting, and alignment test print.
+                    Send test commands, formatting, and alignment print to the active printer.
                   </p>
                 </div>
                 <button

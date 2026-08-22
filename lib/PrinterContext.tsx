@@ -18,7 +18,7 @@ import { useToast } from "@/components/ToastProvider";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-export type PrinterConnectionType = "usb" | "bluetooth" | "qz_tray" | null;
+export type PrinterConnectionType = "usb" | "bluetooth" | "qz_tray" | "epson_network" | null;
 
 export interface PrinterSettings {
   paperWidth: 58 | 80;
@@ -34,6 +34,9 @@ export interface PrinterSettings {
   footerMessage: string;
   autoPrintOnSale: boolean;
   qzPrinterName?: string;
+  epsonPrinterIp?: string;
+  epsonPort?: number;
+  epsonDeviceId?: string;
 }
 
 interface PrinterContextType {
@@ -50,6 +53,7 @@ interface PrinterContextType {
   connectUSB: () => Promise<boolean>;
   connectBluetooth: () => Promise<boolean>;
   connectQZTray: (targetPrinterName?: string) => Promise<boolean>;
+  connectEpsonNetwork: (ip: string, port?: number) => Promise<boolean>;
   fetchQZPrinters: () => Promise<string[]>;
   disconnect: () => Promise<void>;
   printInvoice: (invoice: Invoice, branchName?: string) => Promise<boolean>;
@@ -73,6 +77,9 @@ const DEFAULT_SETTINGS: PrinterSettings = {
   footerMessage: "Thank you for visiting! Please visit again!",
   autoPrintOnSale: false,
   qzPrinterName: "",
+  epsonPrinterIp: "192.168.1.100",
+  epsonPort: 80,
+  epsonDeviceId: "local_printer",
 };
 
 const PrinterContext = createContext<PrinterContextType | undefined>(undefined);
@@ -134,6 +141,10 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       const savedType = localStorage.getItem("pos_thermal_last_connection_type") as PrinterConnectionType;
       if (savedDevice && savedType) {
         setDeviceName(savedDevice);
+        setConnectionType(savedType);
+        if (savedType === "epson_network") {
+          setIsConnected(true);
+        }
       }
     } catch (e) {
       console.warn("Failed to load printer settings from localStorage:", e);
@@ -358,6 +369,59 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
+   * Connect / Configure Epson Direct Network (LAN / Wi-Fi) Printer
+   */
+  const connectEpsonNetwork = async (ip: string, port = 80): Promise<boolean> => {
+    const cleanIp = ip.trim();
+    if (!cleanIp) {
+      toast.warning("Please enter your Epson printer's IP address (e.g. 192.168.1.100)");
+      return false;
+    }
+
+    setIsConnecting(true);
+    try {
+      // Test connectivity by sending a test ping to the API route
+      const res = await fetch("/api/print-epson", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          printerIp: cleanIp,
+          port,
+          deviceId: settings.epsonDeviceId || "local_printer",
+          isTest: true,
+          settings,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Could not reach Epson printer at " + cleanIp);
+      }
+
+      setIsConnected(true);
+      setConnectionType("epson_network");
+      const name = `Epson ePOS (${cleanIp})`;
+      setDeviceName(name);
+
+      localStorage.setItem("pos_thermal_last_device_name", name);
+      localStorage.setItem("pos_thermal_last_connection_type", "epson_network");
+      await updateSettings({ epsonPrinterIp: cleanIp, epsonPort: port });
+
+      toast.success(`Connected to Epson ePOS Network Printer (${cleanIp})! Test print sent.`);
+      return true;
+    } catch (err: any) {
+      console.warn("Epson network connect warning:", err.message);
+      toast.error(
+        err.message ||
+          "Epson printer connection timed out. If your printer is connected via USB cable, please use 'Pair WebUSB' instead."
+      );
+      return false;
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  /**
    * Fetch installed printers list from QZ Tray
    */
   const fetchQZPrinters = async (): Promise<string[]> => {
@@ -390,6 +454,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       setBluetoothCharacteristic(null);
       setIsConnected(false);
       setConnectionType(null);
+      localStorage.removeItem("pos_thermal_last_connection_type");
       toast.info("Thermal printer disconnected.");
     }
   };
@@ -399,7 +464,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   const printRawBytes = async (bytes: Uint8Array): Promise<boolean> => {
     if (!isConnected) {
-      toast.error("No thermal printer connected. Please connect via USB, Bluetooth, or QZ Tray in Settings.");
+      toast.error("No thermal printer connected. Please select a connection mode in Settings.");
       return false;
     }
 
@@ -441,12 +506,44 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   /**
-   * Print Formatted Invoice with all configured store details
+   * Print Formatted Invoice across USB, Bluetooth, QZ Tray, or Epson Direct LAN
    */
   const printInvoice = async (
     invoice: Invoice,
     branchName?: string
   ): Promise<boolean> => {
+    if (connectionType === "epson_network") {
+      setIsPrinting(true);
+      try {
+        const ip = settings.epsonPrinterIp || "192.168.1.100";
+        const res = await fetch("/api/print-epson", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            printerIp: ip,
+            port: settings.epsonPort || 80,
+            deviceId: settings.epsonDeviceId || "local_printer",
+            invoice,
+            settings,
+            branchName,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Epson print failed");
+        }
+        toast.success(`Printed successfully on Epson Printer (${ip})!`);
+        return true;
+      } catch (err: any) {
+        console.error("Epson print invoice error:", err);
+        toast.error("Epson printing failed: " + (err.message || err));
+        return false;
+      } finally {
+        setIsPrinting(false);
+      }
+    }
+
     const receiptOpts: ReceiptOptions = {
       paperWidth: settings.paperWidth,
       storeName: settings.storeName,
@@ -472,6 +569,10 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
    * Print Test Receipt
    */
   const printTestReceipt = async (): Promise<boolean> => {
+    if (connectionType === "epson_network") {
+      return await connectEpsonNetwork(settings.epsonPrinterIp || "192.168.1.100", settings.epsonPort || 80);
+    }
+
     const bytes = generateTestReceiptBytes({
       paperWidth: settings.paperWidth,
       storeName: settings.storeName,
@@ -496,6 +597,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
         connectUSB,
         connectBluetooth,
         connectQZTray,
+        connectEpsonNetwork,
         fetchQZPrinters,
         disconnect,
         printInvoice,

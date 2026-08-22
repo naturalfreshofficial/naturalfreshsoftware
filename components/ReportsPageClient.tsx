@@ -167,34 +167,54 @@ export default function ReportsPageClient() {
     setCurrentPage(1);
   }, [searchQuery, paymentFilter, selectedBranchFilter, datePreset, customStartDate, customEndDate]);
 
+  // Helper to safely parse local YYYY-MM-DD string without timezone skew
+  const parseDateString = (dateStr: string, isEndOfDay = false): Date => {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return isEndOfDay
+      ? new Date(y, m - 1, d, 23, 59, 59, 999)
+      : new Date(y, m - 1, d, 0, 0, 0, 0);
+  };
+
   // Compute Date Boundaries based on selected preset
   const dateRangeLimits = useMemo(() => {
-    const now = new Date();
-    let start: Date | null = null;
-    let end: Date | null = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+    let start: Date | null = todayStart;
+    let end: Date | null = todayEnd;
 
     if (datePreset === "today") {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      start = todayStart;
+      end = todayEnd;
     } else if (datePreset === "this_week") {
-      const day = now.getDay();
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-      start = new Date(now.setDate(diff));
-      start.setHours(0, 0, 0, 0);
+      const current = new Date();
+      const day = current.getDay();
+      const diff = current.getDate() - day + (day === 0 ? -6 : 1);
+      start = new Date(current.getFullYear(), current.getMonth(), diff, 0, 0, 0, 0);
+      end = todayEnd;
     } else if (datePreset === "this_month") {
-      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const current = new Date();
+      start = new Date(current.getFullYear(), current.getMonth(), 1, 0, 0, 0, 0);
+      end = todayEnd;
     } else if (datePreset === "last_month") {
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      const current = new Date();
+      start = new Date(current.getFullYear(), current.getMonth() - 1, 1, 0, 0, 0, 0);
+      end = new Date(current.getFullYear(), current.getMonth(), 0, 23, 59, 59, 999);
     } else if (datePreset === "this_year") {
-      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      const current = new Date();
+      start = new Date(current.getFullYear(), 0, 1, 0, 0, 0, 0);
+      end = todayEnd;
     } else if (datePreset === "custom") {
-      if (customStartDate) {
-        start = new Date(customStartDate);
-        start.setHours(0, 0, 0, 0);
-      }
-      if (customEndDate) {
-        end = new Date(customEndDate);
-        end.setHours(23, 59, 59, 999);
+      if (customStartDate && customEndDate) {
+        start = parseDateString(customStartDate, false);
+        end = parseDateString(customEndDate, true);
+      } else if (customStartDate) {
+        start = parseDateString(customStartDate, false);
+        end = parseDateString(customStartDate, true);
+      } else {
+        start = null;
+        end = null;
       }
     } else if (datePreset === "all_time") {
       start = null;
@@ -216,9 +236,16 @@ export default function ReportsPageClient() {
 
       // 2. Date filter
       if (inv.createdAt) {
-        const invDate = inv.createdAt.toDate ? inv.createdAt.toDate() : new Date(inv.createdAt);
-        if (dateRangeLimits.start && invDate < dateRangeLimits.start) return false;
-        if (dateRangeLimits.end && invDate > dateRangeLimits.end) return false;
+        const invDate = (inv.createdAt as any)?.toDate
+          ? (inv.createdAt as any).toDate()
+          : (inv.createdAt as any)?.seconds
+          ? new Date((inv.createdAt as any).seconds * 1000)
+          : new Date(inv.createdAt as any);
+
+        if (!isNaN(invDate.getTime())) {
+          if (dateRangeLimits.start && invDate.getTime() < dateRangeLimits.start.getTime()) return false;
+          if (dateRangeLimits.end && invDate.getTime() > dateRangeLimits.end.getTime()) return false;
+        }
       }
 
       // 3. Payment Method filter

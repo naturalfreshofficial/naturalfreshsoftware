@@ -120,8 +120,10 @@ export default function CustomDatePicker({
     if (!tempStart || (tempStart && tempEnd)) {
       setTempStart(selectedDateStr);
       setTempEnd("");
+      onChange(selectedDateStr, selectedDateStr);
+      if (onPresetChange) onPresetChange("custom");
     } else if (tempStart && !tempEnd) {
-      if (new Date(selectedDateStr) < new Date(tempStart)) {
+      if (selectedDateStr < tempStart) {
         setTempEnd(tempStart);
         setTempStart(selectedDateStr);
         onChange(selectedDateStr, tempStart);

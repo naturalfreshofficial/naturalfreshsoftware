@@ -556,11 +556,11 @@ export default function POSBillingView() {
           ? draftBills.find((d) => d.id === activeDraftId)?.invoiceNumber || generateInvoiceNumber()
           : generateInvoiceNumber(),
         customer: {
-          id: selectedCustomer.id,
-          name: selectedCustomer.name,
-          phone: selectedCustomer.phone,
-          email: selectedCustomer.email || "",
-          address: selectedCustomer.address || "",
+          id: selectedCustomer?.id || "walk_in",
+          name: selectedCustomer?.name || "Walk-in Customer",
+          phone: selectedCustomer?.phone || "",
+          email: selectedCustomer?.email || "",
+          address: selectedCustomer?.address || "",
         },
         items: invoiceItems,
         itemCount: totalItemsCount,
@@ -619,13 +619,13 @@ export default function POSBillingView() {
           id: item.productId,
           name: item.name,
           price: item.price,
-          barcode: item.barcode || "",
           category: "General",
-          stock: 99,
-          status: "active",
           imageUrl: item.imageUrl || "/logo.png",
+          barcode: item.barcode || "",
+          stock: 999,
+          status: "active",
         },
-        variant: matchedVariant || (item.variantName ? { id: item.variantId || "", name: item.variantName, price: item.price } : undefined),
+        variant: matchedVariant || (item.variantName ? { id: item.variantId || item.variantName, name: item.variantName, price: item.price, status: "active" as const } : undefined),
         quantity: item.quantity,
       };
     });
@@ -636,7 +636,7 @@ export default function POSBillingView() {
     setPaymentMethod(draft.paymentMethod || "UPI");
     setActiveDraftId(draft.id);
 
-    if (draft.customer) {
+    if (draft.customer && draft.customer.name !== "Walk-in Customer") {
       setSelectedCustomer({
         id: draft.customer.id || "",
         name: draft.customer.name,
@@ -644,6 +644,8 @@ export default function POSBillingView() {
         email: draft.customer.email,
         address: draft.customer.address,
       });
+    } else {
+      setSelectedCustomer(null);
     }
 
     setIsDraftsModalOpen(false);
@@ -670,12 +672,6 @@ export default function POSBillingView() {
   const handleCompleteSale = async () => {
     if (cart.length === 0) {
       toast.warning("Cart is empty! Click products on the left to add items.");
-      return;
-    }
-
-    if (!selectedCustomer) {
-      toast.warning("Customer selection is MANDATORY. Please search or add customer in Order Summary before checkout.");
-      setIsCustomerDropdownOpen(true);
       return;
     }
 
@@ -707,11 +703,11 @@ export default function POSBillingView() {
         branchId: selectedBranch?.id || "",
         branchName: selectedBranch?.name || "Main Store",
         customer: {
-          id: selectedCustomer.id,
-          name: selectedCustomer.name,
-          phone: selectedCustomer.phone,
-          email: selectedCustomer.email || "",
-          address: selectedCustomer.address || "",
+          id: selectedCustomer?.id || "walk_in",
+          name: selectedCustomer?.name || "Walk-in Customer",
+          phone: selectedCustomer?.phone || "",
+          email: selectedCustomer?.email || "",
+          address: selectedCustomer?.address || "",
         },
         items: invoiceItems,
         itemCount: totalItemsCount,
@@ -781,8 +777,8 @@ export default function POSBillingView() {
         console.warn("Stock decrement warning:", stockErr);
       }
 
-      // 4. Update customer stats
-      if (selectedCustomer.id) {
+      // 4. Update customer stats (if registered customer)
+      if (selectedCustomer?.id && selectedCustomer.id !== "walk_in") {
         try {
           await updateDoc(doc(db, "customers", selectedCustomer.id), {
             totalOrders: increment(1),
@@ -1163,13 +1159,11 @@ export default function POSBillingView() {
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
               <span>Customer Details</span>
-              <span className="text-red-500">*</span>
+              <span className="text-[10px] text-slate-400 font-normal">(Optional)</span>
             </label>
-            {!selectedCustomer && (
-              <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">
-                Required for billing
-              </span>
-            )}
+            <span className="text-[10px] text-slate-500 font-medium">
+              {selectedCustomer ? "Selected" : "Walk-in by default"}
+            </span>
           </div>
 
           {selectedCustomer ? (
