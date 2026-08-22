@@ -15,6 +15,9 @@ import {
 } from "./escpos";
 import { useToast } from "@/components/ToastProvider";
 
+import { db } from "./firebase";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+
 export type PrinterConnectionType = "usb" | "bluetooth" | null;
 
 export interface PrinterSettings {
@@ -22,7 +25,12 @@ export interface PrinterSettings {
   storeName: string;
   storeAddress: string;
   storePhone: string;
+  storeEmail: string;
+  tagline: string;
+  enableGst: boolean;
   storeGst: string;
+  cgstPercent: number;
+  sgstPercent: number;
   footerMessage: string;
   autoPrintOnSale: boolean;
 }
@@ -34,7 +42,7 @@ interface PrinterContextType {
   isConnecting: boolean;
   isPrinting: boolean;
   settings: PrinterSettings;
-  updateSettings: (newSettings: Partial<PrinterSettings>) => void;
+  updateSettings: (newSettings: Partial<PrinterSettings>) => Promise<void>;
   connectUSB: () => Promise<boolean>;
   connectBluetooth: () => Promise<boolean>;
   disconnect: () => Promise<void>;
@@ -50,12 +58,18 @@ const DEFAULT_SETTINGS: PrinterSettings = {
   storeName: "NATURAL FRESH",
   storeAddress: "Guntur, Andhra Pradesh",
   storePhone: "9398638314",
+  storeEmail: "contact@naturalfresh.com",
+  tagline: "Pure Naturals & Fresh Delight",
+  enableGst: true,
   storeGst: "37AAAAA0000A1Z5",
+  cgstPercent: 2.5,
+  sgstPercent: 2.5,
   footerMessage: "Thank you for visiting! Please visit again!",
   autoPrintOnSale: false,
 };
 
 const PrinterContext = createContext<PrinterContextType | undefined>(undefined);
+
 
 // Known thermal printer Bluetooth GATT Services & Characteristics
 const BLUETOOTH_SERVICES = [
@@ -95,7 +109,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
   const isWebBluetoothSupported =
     typeof window !== "undefined" && "bluetooth" in navigator;
 
-  // Load saved settings & previous device name from localStorage
+  // Load saved settings from Firestore & localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem("pos_thermal_printer_settings");
@@ -110,21 +124,41 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (e) {
       console.warn("Failed to load printer settings from localStorage:", e);
     }
+
+    // Subscribe to Firestore settings/business doc
+    const unsub = onSnapshot(doc(db, "settings", "business"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as Partial<PrinterSettings>;
+        setSettings((prev) => {
+          const merged = { ...prev, ...data };
+          try {
+            localStorage.setItem("pos_thermal_printer_settings", JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+    });
+
+    return () => unsub();
   }, []);
 
-  const updateSettings = useCallback((newSettings: Partial<PrinterSettings>) => {
-    setSettings((prev) => {
-      const updated = { ...prev, ...newSettings };
-      try {
-        localStorage.setItem(
-          "pos_thermal_printer_settings",
-          JSON.stringify(updated)
-        );
-      } catch (e) {}
-      return updated;
-    });
-    toast.success("Printer settings saved!");
-  }, [toast]);
+  const updateSettings = useCallback(async (newSettings: Partial<PrinterSettings>) => {
+    const updated = { ...settings, ...newSettings };
+    setSettings(updated);
+
+    try {
+      localStorage.setItem("pos_thermal_printer_settings", JSON.stringify(updated));
+    } catch (e) {}
+
+    try {
+      await setDoc(doc(db, "settings", "business"), updated, { merge: true });
+      toast.success("Settings saved and synced across all devices!");
+    } catch (e) {
+      console.warn("Firestore settings sync error:", e);
+      toast.success("Settings saved locally!");
+    }
+  }, [settings, toast]);
+
 
   /**
    * Connect via WebUSB

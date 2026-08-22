@@ -52,6 +52,7 @@ import {
   CheckCircle2,
   FolderOpen,
   Store,
+  ShoppingBag,
 } from "lucide-react";
 import { Branch } from "@/lib/types";
 
@@ -144,6 +145,7 @@ export default function POSBillingView() {
   const [completedInvoice, setCompletedInvoice] = useState<Invoice | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [isSubmittingBill, setIsSubmittingBill] = useState(false);
+  const [isMobileCheckoutOpen, setIsMobileCheckoutOpen] = useState(false);
 
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -393,12 +395,19 @@ export default function POSBillingView() {
     setActiveDraftId(null);
   };
 
-  // Calculations
+  // Calculations based on dynamic GST Settings
+  const isGstEnabled = printer.settings.enableGst ?? true;
+  const cgstPercent = isGstEnabled ? Number(printer.settings.cgstPercent ?? 2.5) : 0;
+  const sgstPercent = isGstEnabled ? Number(printer.settings.sgstPercent ?? 2.5) : 0;
+  const totalGstRate = cgstPercent + sgstPercent;
+
   const totalItemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
   const discountAmount = (subtotal * discountPercent) / 100;
   const taxableAmount = Math.max(0, subtotal - discountAmount);
-  const gstTax = taxableAmount * 0.05; // 5% standard GST
+  const cgstAmount = isGstEnabled ? (taxableAmount * cgstPercent) / 100 : 0;
+  const sgstAmount = isGstEnabled ? (taxableAmount * sgstPercent) / 100 : 0;
+  const gstTax = isGstEnabled ? cgstAmount + sgstAmount : 0;
   const totalPayable = taxableAmount + gstTax;
 
   // Save new Customer and auto-select
@@ -499,8 +508,12 @@ export default function POSBillingView() {
         discountPercent,
         discountAmount,
         taxableAmount,
-        taxPercent: 5,
+        taxPercent: isGstEnabled ? totalGstRate : 0,
         taxAmount: gstTax,
+        cgstPercent,
+        sgstPercent,
+        cgstAmount,
+        sgstAmount,
         totalPayable,
         paymentMethod,
         status: "draft", // Will NOT count towards completed sales reports
@@ -522,6 +535,7 @@ export default function POSBillingView() {
       }
 
       clearCart();
+      setIsMobileCheckoutOpen(false);
     } catch (err: any) {
       console.error("Save draft error:", err);
       toast.error("Failed to save draft: " + err.message);
@@ -630,8 +644,12 @@ export default function POSBillingView() {
         discountPercent,
         discountAmount,
         taxableAmount,
-        taxPercent: 5,
+        taxPercent: isGstEnabled ? totalGstRate : 0,
         taxAmount: gstTax,
+        cgstPercent,
+        sgstPercent,
+        cgstAmount,
+        sgstAmount,
         totalPayable,
         paymentMethod,
         status: "completed",
@@ -710,6 +728,7 @@ export default function POSBillingView() {
 
       // Reset cart for next customer
       clearCart();
+      setIsMobileCheckoutOpen(false);
     } catch (err: any) {
       console.error("Complete sale error:", err);
       toast.error("Failed to complete sale: " + err.message);
@@ -725,34 +744,37 @@ export default function POSBillingView() {
       {/* ========================================================================= */}
       <div className="flex-1 flex flex-col min-w-0 bg-white rounded-[6px] border border-slate-200 shadow-xs">
         {/* Top Outlet / Branch Selector Bar */}
-        <div className="bg-slate-900 text-white px-4 py-2.5 rounded-t-[6px] flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-[6px] bg-blue-600 flex items-center justify-center shrink-0">
-              <Store className="w-4 h-4 text-white" />
+        <div className="bg-slate-900 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-t-[6px] flex items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-[6px] bg-blue-600 flex items-center justify-center shrink-0">
+              <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
             </div>
-            <div>
-              <p className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Active Billing Outlet</p>
-              <p className="text-sm font-bold text-white truncate">{selectedBranch?.name || "Main Store"}</p>
+            <div className="min-w-0">
+              <p className="text-[9px] sm:text-[10px] text-slate-300 font-bold uppercase tracking-wider hidden xs:block">
+                Active Outlet
+              </p>
+              <p className="text-xs sm:text-sm font-bold text-white truncate">
+                {selectedBranch?.name || "Main Store"}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap justify-end">
-            {/* Quick Thermal Printer Status */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] bg-slate-800 border border-slate-700 text-[11px]">
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Quick Thermal Printer Status (Hidden on extra small mobile screens) */}
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-[5px] bg-slate-800 border border-slate-700 text-[11px]">
               <Printer className={`w-3.5 h-3.5 ${printer.isConnected ? "text-emerald-400" : "text-slate-400"}`} />
               <span className="text-slate-300 font-medium">
                 {printer.isConnected
-                  ? `${printer.connectionType?.toUpperCase()}: ${printer.deviceName || "Thermal Ready"}`
-                  : "Thermal: Offline"}
+                  ? `${printer.connectionType?.toUpperCase()}`
+                  : "Thermal: Off"}
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-slate-300 whitespace-nowrap font-medium">Switch Branch:</span>
+            {availableBranches.length > 1 && (
               <select
                 value={selectedBranchId}
                 onChange={(e) => handleBranchChange(e.target.value)}
-                className="h-[34px] px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-52"
+                className="h-[30px] sm:h-[34px] px-2 sm:px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer max-w-[135px] sm:max-w-[190px]"
               >
                 {availableBranches.map((b) => (
                   <option key={b.id} value={b.id} className="bg-slate-900 text-white">
@@ -760,9 +782,8 @@ export default function POSBillingView() {
                   </option>
                 ))}
               </select>
-            </div>
+            )}
           </div>
-
         </div>
 
         {/* Category Navigation Tabs */}
@@ -1010,9 +1031,9 @@ export default function POSBillingView() {
       </div>
 
       {/* ========================================================================= */}
-      {/* RIGHT: Order Summary & Checkout Panel */}
+      {/* RIGHT: Order Summary & Checkout Panel (Desktop View Only) */}
       {/* ========================================================================= */}
-      <div className="w-full lg:w-[420px] bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col shrink-0">
+      <div className="hidden lg:flex w-[420px] bg-white rounded-[6px] border border-slate-200 shadow-xs flex-col shrink-0">
         {/* Cart Header */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-2">
@@ -1401,6 +1422,313 @@ export default function POSBillingView() {
           )}
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* MOBILE BOTTOM FLOATING CART FLYOUT BAR */}
+      {/* ========================================================================= */}
+      {cart.length > 0 && (
+        <div className="fixed bottom-14 left-0 right-0 p-3 z-30 lg:hidden animate-in slide-in-from-bottom-5 duration-200">
+          <div className="bg-slate-900/95 backdrop-blur-md text-white p-3 rounded-[12px] shadow-2xl border border-white/10 flex items-center justify-between gap-3">
+            <div
+              className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
+              onClick={() => setIsMobileCheckoutOpen(true)}
+            >
+              <div className="w-10 h-10 rounded-[8px] bg-blue-600 flex items-center justify-center font-bold text-white shrink-0 relative shadow-xs">
+                <ShoppingBag className="w-5 h-5" />
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-white rounded-full text-[9px] font-extrabold flex items-center justify-center">
+                  {totalItemsCount}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white truncate">
+                  {totalItemsCount} Item{totalItemsCount > 1 ? "s" : ""} in Cart
+                </p>
+                <p className="text-sm font-extrabold text-emerald-400 font-mono">
+                  ₹ {totalPayable.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsMobileCheckoutOpen(true)}
+              className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-[8px] text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/30 cursor-pointer shrink-0"
+            >
+              <span>Checkout & Pay</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 0: MOBILE FULL ORDER CHECKOUT DRAWER / MODAL */}
+      {/* ========================================================================= */}
+      {isMobileCheckoutOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end lg:hidden animate-in fade-in duration-200">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsMobileCheckoutOpen(false)}
+          />
+
+          {/* Modal Container (Bottom Sheet) */}
+          <div className="relative bg-white w-full max-h-[92vh] rounded-t-[20px] shadow-2xl flex flex-col z-10 animate-in slide-in-from-bottom duration-300 overflow-hidden border-t border-slate-200">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Order Summary & Checkout</h3>
+                  <p className="text-[10px] text-slate-500">{totalItemsCount} items • {selectedBranch?.name || "Main Store"}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDraftsModalOpen(true)}
+                  title="Draft Bills"
+                  className="h-[30px] px-2 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 rounded-[5px] flex items-center gap-1"
+                >
+                  <Bookmark className="w-3 h-3 text-blue-600" />
+                  <span>Drafts ({draftBills.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileCheckoutOpen(false)}
+                  className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Order Content */}
+            <div className="overflow-y-auto p-4 space-y-4 flex-1">
+              {/* Customer Selector */}
+              <div className="p-3 bg-slate-50 rounded-[8px] border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <span>Customer</span>
+                    <span className="text-red-500">* (Required)</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddCustomerModalOpen(true)}
+                    className="text-[11px] font-bold text-blue-600 flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>New</span>
+                  </button>
+                </div>
+
+                {selectedCustomer ? (
+                  <div className="flex items-center justify-between p-2 bg-white rounded-[6px] border border-blue-200">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                        {selectedCustomer.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 text-xs truncate">{selectedCustomer.name}</p>
+                        <p className="text-[10px] text-slate-500 font-mono">{selectedCustomer.phone}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCustomer(null)}
+                      className="text-[11px] font-bold text-red-600 px-2 py-1 bg-red-50 rounded"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search Customer by Name or Mobile..."
+                      value={customerSearchQuery}
+                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                      className="w-full h-[34px] px-3 bg-white border border-slate-300 rounded-[6px] text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {customerSearchQuery && filteredCustomers.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-[6px] shadow-xl z-30 max-h-44 overflow-y-auto divide-y divide-slate-100">
+                        {filteredCustomers.map((cust) => (
+                          <div
+                            key={cust.id}
+                            onClick={() => {
+                              setSelectedCustomer(cust);
+                              setCustomerSearchQuery("");
+                            }}
+                            className="p-2.5 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                          >
+                            <div>
+                              <p className="text-xs font-bold text-slate-900">{cust.name}</p>
+                              <p className="text-[10px] text-slate-500 font-mono">{cust.phone}</p>
+                            </div>
+                            <span className="text-[10px] text-blue-600 font-bold">Select</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Items List in Cart */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-900">Cart Items ({cart.length})</span>
+                  <button
+                    type="button"
+                    onClick={clearCart}
+                    className="text-[11px] text-red-500 hover:text-red-700 font-semibold"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {cart.map((item) => (
+                    <div
+                      key={item.product.id}
+                      className="p-2.5 bg-slate-50 rounded-[8px] border border-slate-200 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          ₹{item.product.price.toFixed(2)} × {item.quantity} = <strong className="text-slate-900 font-extrabold">₹{(item.product.price * item.quantity).toFixed(2)}</strong>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.product.id, -1)}
+                          className="w-6 h-6 rounded bg-white border border-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-6 text-center font-mono font-bold text-xs">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.product.id, 1)}
+                          className="w-6 h-6 rounded bg-blue-600 text-white flex items-center justify-center font-bold text-xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeFromCart(item.product.id)}
+                          className="w-6 h-6 rounded text-red-500 hover:bg-red-50 flex items-center justify-center ml-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Discount & Notes */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Discount (%)</label>
+                  <div className="flex items-center gap-1">
+                    {[0, 5, 10, 15].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDiscountPercent(d)}
+                        className={`flex-1 py-1 rounded text-[11px] font-bold border transition-colors ${
+                          discountPercent === d
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-slate-700 border-slate-200"
+                        }`}
+                      >
+                        {d}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment Mode</label>
+                  <div className="flex items-center gap-1">
+                    {(["UPI", "Cash", "Card"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setPaymentMethod(mode)}
+                        className={`flex-1 py-1 rounded text-[11px] font-bold border transition-colors ${
+                          paymentMethod === mode
+                            ? "bg-emerald-600 text-white border-emerald-600"
+                            : "bg-white text-slate-700 border-slate-200"
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Calculations Summary */}
+              <div className="p-3 bg-slate-50 rounded-[8px] border border-slate-200 space-y-1.5 text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal</span>
+                  <span className="font-semibold font-mono">₹ {subtotal.toFixed(2)}</span>
+                </div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-red-600">
+                    <span>Discount ({discountPercent}%)</span>
+                    <span className="font-semibold font-mono">- ₹ {discountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-600">
+                  <span>GST (5%)</span>
+                  <span className="font-semibold font-mono">₹ {gstTax.toFixed(2)}</span>
+                </div>
+                <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-extrabold text-slate-900">
+                  <span>Total Payable:</span>
+                  <span className="text-base text-blue-600 font-mono">₹ {totalPayable.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="p-4 bg-white border-t border-slate-100 grid grid-cols-2 gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleSaveToDraft}
+                disabled={isSubmittingBill}
+                className="h-[42px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-[8px] text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Bookmark className="w-4 h-4 text-amber-600" />
+                <span>Save Draft</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCompleteSale}
+                disabled={isSubmittingBill}
+                className="h-[42px] bg-blue-600 hover:bg-blue-700 text-white rounded-[8px] text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20"
+              >
+                {isSubmittingBill ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <span>Complete Sale</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL 1: ADD CUSTOMER MODAL */}

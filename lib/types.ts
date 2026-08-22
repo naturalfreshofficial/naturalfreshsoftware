@@ -38,6 +38,10 @@ export interface Invoice {
   taxableAmount: number;
   taxPercent: number;
   taxAmount: number;
+  cgstPercent?: number;
+  sgstPercent?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
   totalPayable: number;
   paymentMethod: "UPI" | "Cash" | "Card";
   status: "completed" | "draft" | "cancelled";
