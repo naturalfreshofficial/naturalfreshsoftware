@@ -46,6 +46,53 @@ export const ESC_POS = {
 };
 
 /**
+ * Word-wrap helper to split strings into multiple lines without breaking words mid-way
+ */
+export function wrapText(text: string, maxLen: number): string[] {
+  if (!text) return [];
+  const words = text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    if (!currentLine) {
+      currentLine = word;
+    } else if ((currentLine + " " + word).length <= maxLen) {
+      currentLine += " " + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
+/**
+ * Clean product & variation display name to ensure no repeated variant names
+ */
+export function getItemDisplayName(name: string, variantName?: string): string {
+  if (!name) return "";
+  let cleanName = name.trim();
+
+  if (variantName && variantName.trim()) {
+    const v = variantName.trim();
+    // Strip any existing repeated (variant) patterns in the product name
+    const regex = new RegExp(`\\s*\\(${escapeRegex(v)}\\)`, "gi");
+    cleanName = cleanName.replace(regex, "").trim();
+    return `${cleanName} (${v})`;
+  }
+
+  // Also remove any general double parentheses duplication like "(Single Scoop) (Single Scoop)"
+  cleanName = cleanName.replace(/\(([^)]+)\)\s*\(\1\)/gi, "($1)");
+  return cleanName;
+}
+
+function escapeRegex(str: string) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Helper class to build ESC/POS command byte buffers
  */
 export class EscPosBuilder {
@@ -113,7 +160,7 @@ export class EscPosBuilder {
   }
 
   /**
-   * Two columns row (e.g. "Subtotal" on left, "Rs. 250.00" on right)
+   * Two columns row (e.g. "Subtotal:" on left, "Rs. 180.00" on right)
    */
   public twoColumns(left: string, right: string, bold: boolean = false): this {
     if (bold) this.bold(true);
@@ -137,9 +184,13 @@ export class EscPosBuilder {
 
     if (this.cols === 32) {
       // 58mm Paper (32 columns total):
-      // Line 1: Item Name (bold)
-      // Line 2: "  Qty x Rate" -> Right aligned Total
-      this.align("left").bold(true).textLn(name).bold(false);
+      // Line 1: Wrapped clean item name (bold)
+      const nameLines = wrapText(name, 32);
+      this.align("left").bold(true);
+      nameLines.forEach((l) => this.textLn(l));
+      this.bold(false);
+
+      // Line 2: "  1 x Rs.80.00          Rs.80.00"
       const detailLeft = `  ${qtyStr} x Rs.${priceStr}`;
       const rightVal = `Rs.${totalStr}`;
       const spaces = Math.max(1, this.cols - detailLeft.length - rightVal.length);
@@ -193,6 +244,7 @@ export function generateInvoiceReceiptBytes(
 ): Uint8Array {
   const width = options.paperWidth || 58;
   const builder = new EscPosBuilder(width);
+  const cols = builder.getColumns();
 
   // Business Profile Details from Settings
   const storeName = (options.storeName || "NATURAL FRESH").trim();
@@ -203,7 +255,7 @@ export function generateInvoiceReceiptBytes(
   const footer = (options.footerMessage || "Thank you for visiting! Please visit again!").trim();
   const branchName = (invoice.branchName || "Main Store").trim();
 
-  // 1. Header: Business Name & Address
+  // 1. Header: Business Name
   builder
     .align("center")
     .size("double-both")
@@ -212,17 +264,24 @@ export function generateInvoiceReceiptBytes(
     .size("normal")
     .bold(false);
 
+  // Outlet Name
   if (branchName && branchName.toLowerCase() !== storeName.toLowerCase()) {
-    builder.textLn(`Outlet: ${branchName}`);
+    builder.align("center").textLn(`Outlet: ${branchName}`);
   }
+
+  // Address with proper word-wrapping (prevents mid-word hyphen breaks)
   if (address) {
-    builder.textLn(address);
+    const addressLines = wrapText(address, cols);
+    builder.align("center");
+    addressLines.forEach((line) => builder.textLn(line));
   }
+
+  // Phone & GSTIN
   if (phone) {
-    builder.textLn(`Phone: ${phone}`);
+    builder.align("center").textLn(`Phone: ${phone}`);
   }
   if (isGst && gstin) {
-    builder.textLn(`GSTIN: ${gstin}`);
+    builder.align("center").textLn(`GSTIN: ${gstin}`);
   }
 
   builder.doubleDivider();
@@ -232,8 +291,10 @@ export function generateInvoiceReceiptBytes(
     ? invoice.createdAt.toDate()
     : invoice.createdAt instanceof Date
     ? invoice.createdAt
+    : invoice.createdAt?.seconds
+    ? new Date(invoice.createdAt.seconds * 1000)
     : new Date();
-  
+
   const dateStr = invoiceDate.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "2-digit",
@@ -273,12 +334,10 @@ export function generateInvoiceReceiptBytes(
       .divider();
   }
 
-  // 4. Items List: Item name (with variant if any), Qty, Price, Total
+  // 4. Items List: Clean item name (no duplicates), Qty, Price, Total
   if (invoice.items && invoice.items.length > 0) {
     invoice.items.forEach((item) => {
-      const displayName = item.variantName
-        ? `${item.name} (${item.variantName})`
-        : item.name;
+      const displayName = getItemDisplayName(item.name, item.variantName);
       builder.itemRow(displayName, item.quantity, item.price, item.total);
     });
   }
@@ -323,11 +382,11 @@ export function generateInvoiceReceiptBytes(
 
   builder.divider();
 
-  // 9. Thank You Message from Settings
+  // 9. Thank You Message & Branding
   if (footer) {
-    builder
-      .align("center")
-      .textLn(footer);
+    const footerLines = wrapText(footer, cols);
+    builder.align("center");
+    footerLines.forEach((line) => builder.textLn(line));
   }
 
   builder

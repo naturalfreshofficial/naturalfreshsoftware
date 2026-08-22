@@ -22,6 +22,7 @@ import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
 import { usePrinter } from "@/lib/PrinterContext";
 import { getItemKgWeight, formatKgStock, getApproximateScoops } from "@/lib/stockUtils";
+import { getItemDisplayName } from "@/lib/escpos";
 import {
   Search,
   LayoutGrid,
@@ -534,9 +535,7 @@ export default function POSBillingView() {
       const invoiceItems: InvoiceItem[] = cart.map((item) => {
         const itemPrice = item.variant ? item.variant.price : item.product.price;
         const itemBarcode = item.variant?.barcode || item.product.barcode;
-        const itemName = item.variant
-          ? `${item.product.name} (${item.variant.name})`
-          : item.product.name;
+        const itemName = item.product.name.trim();
 
         return {
           productId: item.product.id,
@@ -681,9 +680,7 @@ export default function POSBillingView() {
       const invoiceItems: InvoiceItem[] = cart.map((item) => {
         const itemPrice = item.variant ? item.variant.price : item.product.price;
         const itemBarcode = item.variant?.barcode || item.product.barcode;
-        const itemName = item.variant
-          ? `${item.product.name} (${item.variant.name})`
-          : item.product.name;
+        const itemName = item.product.name.trim();
 
         return {
           productId: item.product.id,
@@ -2250,7 +2247,7 @@ export default function POSBillingView() {
                   {completedInvoice.items?.map((it, idx) => (
                     <tr key={idx}>
                       <td className="py-1.5 font-medium text-slate-800">
-                        <span>{it.name}</span>
+                        <span>{getItemDisplayName(it.name, it.variantName)}</span>
                       </td>
                       <td className="py-1.5 text-center text-slate-600 font-mono">{it.quantity}</td>
                       <td className="py-1.5 text-right text-slate-600 font-mono">₹{it.price.toFixed(2)}</td>
