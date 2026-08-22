@@ -27,6 +27,9 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Eye,
+  Tag,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import {
   collection,
@@ -44,27 +47,14 @@ import BulkImportModal from "@/components/BulkImportModal";
 import { downloadSampleExcel } from "@/lib/sampleProducts";
 import { useToast } from "@/components/ToastProvider";
 import CustomSelect from "@/components/CustomSelect";
+import {
+  ProductItem,
+  CategoryItem,
+  VariationItem,
+  ProductVariant,
+} from "@/lib/types";
 
-export interface ProductItem {
-  id: string;
-  name: string;
-  price: number;
-  category: string;
-  barcode: string;
-  isFavorite: boolean;
-  stock: number;
-  bufferStock: number;
-  status: "active" | "inactive";
-  imageUrl?: string;
-  createdAt?: any;
-}
-
-export interface CategoryItem {
-  id: string;
-  name: string;
-  status: "active" | "inactive";
-  createdAt?: any;
-}
+export type { ProductItem, CategoryItem, VariationItem, ProductVariant };
 
 const DEFAULT_CATEGORIES = [
   "Groceries",
@@ -74,6 +64,17 @@ const DEFAULT_CATEGORIES = [
   "Household",
   "Dairy",
   "Ice Creams",
+];
+
+const DEFAULT_VARIATIONS = [
+  "Single Scoop",
+  "Double Scoop",
+  "Small (100ml)",
+  "Medium (250ml)",
+  "Family Pack (500ml)",
+  "Party Tub (1L)",
+  "Waffle Cone",
+  "Regular Cup",
 ];
 
 const DEFAULT_SEED_PRODUCTS = [
@@ -86,6 +87,8 @@ const DEFAULT_SEED_PRODUCTS = [
     stock: 45,
     bufferStock: 10,
     status: "active" as const,
+    hasVariations: false,
+    variants: [],
   },
   {
     name: "Fortune Sunflower Oil 1L",
@@ -96,56 +99,43 @@ const DEFAULT_SEED_PRODUCTS = [
     stock: 28,
     bufferStock: 8,
     status: "active" as const,
+    hasVariations: false,
+    variants: [],
   },
   {
-    name: "Tata Salt 1kg",
-    price: 20.0,
-    category: "Groceries",
+    name: "Belgian Dark Chocolate",
+    price: 60.0,
+    category: "Ice Creams",
     barcode: "8901056308512",
-    isFavorite: false,
+    isFavorite: true,
     stock: 60,
     bufferStock: 15,
     status: "active" as const,
-  },
-  {
-    name: "Surf Excel Matic 1kg",
-    price: 145.0,
-    category: "Household",
-    barcode: "8901030900721",
-    isFavorite: false,
-    stock: 18,
-    bufferStock: 5,
-    status: "active" as const,
-  },
-  {
-    name: "Brooke Bond Red Label 250g",
-    price: 135.0,
-    category: "Beverages",
-    barcode: "8901030811210",
-    isFavorite: true,
-    stock: 22,
-    bufferStock: 6,
-    status: "active" as const,
-  },
-  {
-    name: "Parle-G Biscuit 200g",
-    price: 20.0,
-    category: "Snacks",
-    barcode: "8901715000050",
-    isFavorite: true,
-    stock: 80,
-    bufferStock: 20,
-    status: "active" as const,
+    hasVariations: true,
+    variants: [
+      { id: "single_scoop", name: "Single Scoop", price: 60, status: "active" as const },
+      { id: "double_scoop", name: "Double Scoop", price: 110, status: "active" as const },
+      { id: "500ml_tub", name: "Family Pack (500ml)", price: 240, status: "active" as const },
+    ],
   },
 ];
 
+interface FormVariantRow {
+  id: string;
+  name: string;
+  price: number | "";
+  barcode: string;
+  enabled: boolean;
+}
+
 export default function ProductsPageClient() {
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<"products" | "categories">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "categories" | "variations">("products");
 
   // State for Firestore data
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [variations, setVariations] = useState<VariationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -157,13 +147,15 @@ export default function ProductsPageClient() {
   // Modals state
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isVariationModalOpen, setIsVariationModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [viewProduct, setViewProduct] = useState<ProductItem | null>(null);
   const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
   const [editingCategory, setEditingCategory] = useState<CategoryItem | null>(null);
+  const [editingVariation, setEditingVariation] = useState<VariationItem | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Product Form state (Only Buffer Stock, no Current Stock)
+  // Product Form state
   const [productName, setProductName] = useState("");
   const [productPrice, setProductPrice] = useState<number | "">("");
   const [productCategory, setProductCategory] = useState("");
@@ -176,15 +168,25 @@ export default function ProductsPageClient() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Variations in Product Form
+  const [hasVariations, setHasVariations] = useState(false);
+  const [formVariants, setFormVariants] = useState<FormVariantRow[]>([]);
+  const [newCustomVariantName, setNewCustomVariantName] = useState("");
+
   // Category Form state
   const [categoryName, setCategoryName] = useState("");
   const [categoryStatus, setCategoryStatus] = useState<"active" | "inactive">("active");
+
+  // Variation Form state
+  const [variationName, setVariationName] = useState("");
+  const [variationStatus, setVariationStatus] = useState<"active" | "inactive">("active");
 
   // Subscribe to Firebase Firestore collections
   useEffect(() => {
     setLoading(true);
     let unsubProducts = () => {};
     let unsubCategories = () => {};
+    let unsubVariations = () => {};
 
     try {
       // Products listener
@@ -201,7 +203,6 @@ export default function ProductsPageClient() {
         },
         (error) => {
           console.warn("Firestore products listener fallback:", error);
-          // Try without orderBy if index is building or empty
           const fallbackUnsub = onSnapshot(collection(db, "products"), (snapshot) => {
             const items: ProductItem[] = [];
             snapshot.forEach((doc) => {
@@ -237,6 +238,30 @@ export default function ProductsPageClient() {
           unsubCategories = fallbackUnsub;
         }
       );
+
+      // Variations listener
+      const variationsQuery = query(collection(db, "variations"), orderBy("name", "asc"));
+      unsubVariations = onSnapshot(
+        variationsQuery,
+        (snapshot) => {
+          const items: VariationItem[] = [];
+          snapshot.forEach((doc) => {
+            items.push({ id: doc.id, ...doc.data() } as VariationItem);
+          });
+          setVariations(items);
+        },
+        (error) => {
+          console.warn("Firestore variations fallback:", error);
+          const fallbackUnsub = onSnapshot(collection(db, "variations"), (snapshot) => {
+            const items: VariationItem[] = [];
+            snapshot.forEach((doc) => {
+              items.push({ id: doc.id, ...doc.data() } as VariationItem);
+            });
+            setVariations(items);
+          });
+          unsubVariations = fallbackUnsub;
+        }
+      );
     } catch (err: any) {
       console.error("Firebase init error:", err);
       setSyncError(err.message);
@@ -246,13 +271,15 @@ export default function ProductsPageClient() {
     return () => {
       unsubProducts();
       unsubCategories();
+      unsubVariations();
     };
   }, []);
 
-  // Quick seed database helper if collections are empty
+  // Quick seed database helper
   const handleSeedDefaults = async () => {
     setIsSubmitting(true);
     try {
+      // Seed Categories
       for (const catName of DEFAULT_CATEGORIES) {
         if (!categories.some((c) => c.name.toLowerCase() === catName.toLowerCase())) {
           await addDoc(collection(db, "categories"), {
@@ -263,6 +290,18 @@ export default function ProductsPageClient() {
         }
       }
 
+      // Seed Variations
+      for (const varName of DEFAULT_VARIATIONS) {
+        if (!variations.some((v) => v.name.toLowerCase() === varName.toLowerCase())) {
+          await addDoc(collection(db, "variations"), {
+            name: varName,
+            status: "active",
+            createdAt: serverTimestamp(),
+          });
+        }
+      }
+
+      // Seed Products
       for (const prod of DEFAULT_SEED_PRODUCTS) {
         if (!products.some((p) => p.name.toLowerCase() === prod.name.toLowerCase())) {
           await addDoc(collection(db, "products"), {
@@ -271,6 +310,7 @@ export default function ProductsPageClient() {
           });
         }
       }
+      toast.success("Sample data (products, categories, variations) loaded successfully!");
     } catch (err: any) {
       toast.error("Seeding error: " + err.message);
     } finally {
@@ -289,12 +329,32 @@ export default function ProductsPageClient() {
     return counts;
   }, [products]);
 
+  // Calculate product count per variation
+  const productCountByVariation = useMemo(() => {
+    const counts: Record<string, number> = {};
+    products.forEach((prod) => {
+      if (prod.hasVariations && Array.isArray(prod.variants)) {
+        prod.variants.forEach((v) => {
+          if (v && v.name) {
+            counts[v.name] = (counts[v.name] || 0) + 1;
+          }
+        });
+      }
+    });
+    return counts;
+  }, [products]);
+
   // Filtered Products
   const filteredProducts = useMemo(() => {
     return products.filter((item) => {
       const matchesSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.barcode?.toLowerCase().includes(searchQuery.toLowerCase());
+        item.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.hasVariations &&
+          item.variants?.some((v) =>
+            v.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            v.barcode?.toLowerCase().includes(searchQuery.toLowerCase())
+          ));
       const matchesCategory =
         selectedCategoryFilter === "All" || item.category === selectedCategoryFilter;
       const matchesStatus =
@@ -315,7 +375,6 @@ export default function ProductsPageClient() {
   const ITEMS_PER_PAGE = 45;
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Reset to page 1 whenever filters or search query changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, selectedCategoryFilter, statusFilter]);
@@ -334,13 +393,19 @@ export default function ProductsPageClient() {
     );
   }, [categories, searchQuery]);
 
+  // Filtered Variations
+  const filteredVariations = useMemo(() => {
+    return variations.filter((v) =>
+      v.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [variations, searchQuery]);
+
   // Helper unique numeric barcode generator
   const generateUniqueNumericBarcode = () => {
     let candidate = "";
     const existingBarcodes = new Set(products.map((p) => p.barcode));
     let attempts = 0;
     do {
-      // 13-digit numeric barcode (only digits 0-9)
       const randomDigits = Math.floor(1000000000 + Math.random() * 9000000000).toString();
       candidate = `890${randomDigits}`;
       attempts++;
@@ -364,6 +429,37 @@ export default function ProductsPageClient() {
       setProductStatus(product.status);
       setImageFile(null);
       setImagePreview(product.imageUrl || null);
+      setHasVariations(Boolean(product.hasVariations));
+
+      // Reconstruct form variants
+      const savedVariants = product.variants || [];
+      const savedMap = new Map(savedVariants.map((v) => [v.name.toLowerCase().trim(), v]));
+      
+      const rows: FormVariantRow[] = [];
+      // 1. All store variations
+      variations.forEach((v) => {
+        const saved = savedMap.get(v.name.toLowerCase().trim());
+        rows.push({
+          id: v.id,
+          name: v.name,
+          price: saved ? saved.price : "",
+          barcode: saved?.barcode || "",
+          enabled: Boolean(saved),
+        });
+        savedMap.delete(v.name.toLowerCase().trim());
+      });
+      // 2. Any additional custom variants that were on this product
+      savedMap.forEach((v, name) => {
+        rows.push({
+          id: v.id || name,
+          name: v.name,
+          price: v.price,
+          barcode: v.barcode || "",
+          enabled: true,
+        });
+      });
+
+      setFormVariants(rows);
     } else {
       setEditingProduct(null);
       setProductName("");
@@ -376,7 +472,21 @@ export default function ProductsPageClient() {
       setProductStatus("active");
       setImageFile(null);
       setImagePreview(null);
+      setHasVariations(false);
+
+      // Start with all active store variations unselected
+      const rows: FormVariantRow[] = variations
+        .filter((v) => v.status !== "inactive")
+        .map((v) => ({
+          id: v.id,
+          name: v.name,
+          price: "",
+          barcode: "",
+          enabled: false,
+        }));
+      setFormVariants(rows);
     }
+    setNewCustomVariantName("");
     setIsProductModalOpen(true);
   };
 
@@ -394,6 +504,20 @@ export default function ProductsPageClient() {
     setIsCategoryModalOpen(true);
   };
 
+  // Open modal for Add/Edit variation
+  const openVariationModal = (variation?: VariationItem) => {
+    if (variation) {
+      setEditingVariation(variation);
+      setVariationName(variation.name);
+      setVariationStatus(variation.status);
+    } else {
+      setEditingVariation(null);
+      setVariationName("");
+      setVariationStatus("active");
+    }
+    setIsVariationModalOpen(true);
+  };
+
   // Handle local image selection
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -408,16 +532,94 @@ export default function ProductsPageClient() {
     }
   };
 
-  // Save Product (Upload to ImageKit first if image selected, then Firestore)
+  // Add custom variant row dynamically inside Product Form
+  const handleAddCustomVariantToForm = async () => {
+    const name = newCustomVariantName.trim();
+    if (!name) {
+      toast.warning("Please enter a variant name (e.g. 500ml, Single Scoop)");
+      return;
+    }
+
+    if (formVariants.some((v) => v.name.toLowerCase() === name.toLowerCase())) {
+      toast.info(`Variant "${name}" is already in the list. Enable it below.`);
+      setFormVariants((prev) =>
+        prev.map((v) =>
+          v.name.toLowerCase() === name.toLowerCase() ? { ...v, enabled: true } : v
+        )
+      );
+      setNewCustomVariantName("");
+      return;
+    }
+
+    // Add to current form variants list as enabled
+    const newRow: FormVariantRow = {
+      id: `var_${Date.now()}`,
+      name,
+      price: "",
+      barcode: "",
+      enabled: true,
+    };
+    setFormVariants((prev) => [...prev, newRow]);
+    setNewCustomVariantName("");
+
+    // Also auto-save to variations collection if not already in store variations
+    const varExists = variations.some((v) => v.name.toLowerCase() === name.toLowerCase());
+    if (!varExists) {
+      try {
+        await addDoc(collection(db, "variations"), {
+          name,
+          status: "active",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn("Auto save variation warning:", err);
+      }
+    }
+  };
+
+  // Save Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productName.trim()) {
       toast.warning("Please enter a product name");
       return;
     }
-    if (productPrice === "" || Number(productPrice) < 0) {
-      toast.warning("Please enter a valid price");
-      return;
+
+    // Variations validation
+    let validVariants: ProductVariant[] = [];
+    let calculatedBasePrice = Number(productPrice);
+
+    if (hasVariations) {
+      const enabledRows = formVariants.filter((v) => v.enabled);
+      if (enabledRows.length === 0) {
+        toast.warning("Please select at least one variation for this product or turn off variations.");
+        return;
+      }
+
+      for (const row of enabledRows) {
+        if (row.price === "" || Number(row.price) <= 0) {
+          toast.warning(`Please enter a valid positive price for variation "${row.name}".`);
+          return;
+        }
+      }
+
+      validVariants = enabledRows.map((v) => ({
+        id: v.id || v.name.toLowerCase().replace(/\s+/g, "_"),
+        name: v.name.trim(),
+        price: Number(v.price),
+        barcode: (v.barcode || "").trim(),
+        status: "active" as const,
+      }));
+
+      // Base price defaults to lowest variant price
+      const minVariantPrice = Math.min(...validVariants.map((v) => v.price));
+      calculatedBasePrice = minVariantPrice;
+    } else {
+      if (productPrice === "" || Number(productPrice) < 0) {
+        toast.warning("Please enter a valid price");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -463,7 +665,7 @@ export default function ProductsPageClient() {
       // 2. Prepare Firestore document data
       const productData = {
         name: productName.trim(),
-        price: Number(productPrice),
+        price: Number(calculatedBasePrice),
         category: targetCategory,
         barcode: (productBarcode.trim() || generateUniqueNumericBarcode()).replace(/\D/g, ""),
         isFavorite: Boolean(productIsFavorite),
@@ -471,15 +673,15 @@ export default function ProductsPageClient() {
         bufferStock: Number(productBufferStock) || 0,
         status: productStatus,
         imageUrl: finalImageUrl,
+        hasVariations: Boolean(hasVariations),
+        variants: hasVariations ? validVariants : [],
         updatedAt: serverTimestamp(),
       };
 
       if (editingProduct) {
-        // Update existing product
         await updateDoc(doc(db, "products", editingProduct.id), productData);
         toast.success(`Product "${productName.trim()}" updated successfully!`);
       } else {
-        // Create new product
         await addDoc(collection(db, "products"), {
           ...productData,
           createdAt: serverTimestamp(),
@@ -532,6 +734,42 @@ export default function ProductsPageClient() {
     }
   };
 
+  // Save Variation
+  const handleSaveVariation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!variationName.trim()) {
+      toast.warning("Please enter a variation name (e.g. Single Scoop, 500ml, Large)");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const variationData = {
+        name: variationName.trim(),
+        status: variationStatus,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingVariation) {
+        await updateDoc(doc(db, "variations", editingVariation.id), variationData);
+        toast.success(`Variation "${variationName.trim()}" updated successfully!`);
+      } else {
+        await addDoc(collection(db, "variations"), {
+          ...variationData,
+          createdAt: serverTimestamp(),
+        });
+        toast.success(`Variation "${variationName.trim()}" created successfully!`);
+      }
+
+      setIsVariationModalOpen(false);
+    } catch (err: any) {
+      console.error("Save variation error:", err);
+      toast.error("Failed to save variation: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Delete product
   const handleDeleteProduct = async (id: string, name: string) => {
     if (confirm(`Are you sure you want to delete "${name}"?`)) {
@@ -558,6 +796,24 @@ export default function ProductsPageClient() {
         toast.success(`Category "${name}" deleted.`);
       } catch (err: any) {
         toast.error("Error deleting category: " + err.message);
+      }
+    }
+  };
+
+  // Delete variation
+  const handleDeleteVariation = async (id: string, name: string) => {
+    const assignedCount = productCountByVariation[name] || 0;
+    const confirmMsg =
+      assignedCount > 0
+        ? `"${name}" is used in ${assignedCount} product(s). Are you sure you want to delete it?`
+        : `Are you sure you want to delete variation "${name}"?`;
+
+    if (confirm(confirmMsg)) {
+      try {
+        await deleteDoc(doc(db, "variations", id));
+        toast.success(`Variation "${name}" deleted.`);
+      } catch (err: any) {
+        toast.error("Error deleting variation: " + err.message);
       }
     }
   };
@@ -590,11 +846,11 @@ export default function ProductsPageClient() {
       {/* Top Header Card with Tabs & Actions */}
       <div className="bg-white rounded-[6px] border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
         {/* Left: Tab Switchers */}
-        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-[6px] border border-slate-200 self-start md:self-auto">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-[6px] border border-slate-200 self-start md:self-auto flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab("products")}
-            className={`h-[36px] px-4 flex items-center gap-2 rounded-[6px] text-xs font-bold transition-all cursor-pointer ${
+            className={`h-[36px] px-3.5 flex items-center gap-2 rounded-[6px] text-xs font-bold transition-all cursor-pointer ${
               activeTab === "products"
                 ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
@@ -607,7 +863,7 @@ export default function ProductsPageClient() {
           <button
             type="button"
             onClick={() => setActiveTab("categories")}
-            className={`h-[36px] px-4 flex items-center gap-2 rounded-[6px] text-xs font-bold transition-all cursor-pointer ${
+            className={`h-[36px] px-3.5 flex items-center gap-2 rounded-[6px] text-xs font-bold transition-all cursor-pointer ${
               activeTab === "categories"
                 ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
@@ -615,6 +871,19 @@ export default function ProductsPageClient() {
           >
             <FolderTree className="w-4 h-4" />
             <span>Categories ({categories.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("variations")}
+            className={`h-[36px] px-3.5 flex items-center gap-2 rounded-[6px] text-xs font-bold transition-all cursor-pointer ${
+              activeTab === "variations"
+                ? "bg-blue-600 text-white shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>Variations ({variations.length})</span>
           </button>
         </div>
 
@@ -641,7 +910,7 @@ export default function ProductsPageClient() {
             <span>Bulk Import</span>
           </button>
 
-          {products.length === 0 && categories.length === 0 && !loading && (
+          {products.length === 0 && categories.length === 0 && variations.length === 0 && !loading && (
             <button
               type="button"
               onClick={handleSeedDefaults}
@@ -662,7 +931,7 @@ export default function ProductsPageClient() {
               <Plus className="w-4 h-4" />
               <span>Add Product</span>
             </button>
-          ) : (
+          ) : activeTab === "categories" ? (
             <button
               type="button"
               onClick={() => openCategoryModal()}
@@ -670,6 +939,15 @@ export default function ProductsPageClient() {
             >
               <Plus className="w-4 h-4" />
               <span>Add Category</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => openVariationModal()}
+              className="h-[36px] px-4 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold transition-all shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Variation</span>
             </button>
           )}
         </div>
@@ -685,8 +963,10 @@ export default function ProductsPageClient() {
               type="text"
               placeholder={
                 activeTab === "products"
-                  ? "Search products by name, barcode..."
-                  : "Search category name..."
+                  ? "Search products by name, barcode, variation..."
+                  : activeTab === "categories"
+                  ? "Search category name..."
+                  : "Search variation name..."
               }
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -739,7 +1019,7 @@ export default function ProductsPageClient() {
                 <p className="text-xs text-slate-400 max-w-sm mt-1">
                   {searchQuery
                     ? "Try adjusting your search or category filters."
-                    : "Get started by adding your first product with ImageKit upload and Firestore sync."}
+                    : "Get started by adding your first product with variations and multi-pricing."}
                 </p>
                 <button
                   type="button"
@@ -760,7 +1040,7 @@ export default function ProductsPageClient() {
                         <th className="py-3 px-4">Product Info</th>
                         <th className="py-3 px-4">Category</th>
                         <th className="py-3 px-4">Barcode ID</th>
-                        <th className="py-3 px-4 text-right">Price</th>
+                        <th className="py-3 px-4 text-right">Price / Variations</th>
                         <th className="py-3 px-4 text-center">Buffer Stock</th>
                         <th className="py-3 px-4 text-center">Status</th>
                         <th className="py-3 px-4 text-right">Actions</th>
@@ -768,6 +1048,11 @@ export default function ProductsPageClient() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {paginatedProducts.map((prod) => {
+                        const hasVariants = prod.hasVariations && prod.variants && prod.variants.length > 0;
+                        const variantPrices = hasVariants ? prod.variants!.map((v) => v.price) : [prod.price];
+                        const minP = Math.min(...variantPrices);
+                        const maxP = Math.max(...variantPrices);
+
                         return (
                           <tr key={prod.id} className="hover:bg-slate-50/70 transition-colors">
                             {/* Favorite star */}
@@ -800,8 +1085,16 @@ export default function ProductsPageClient() {
                                     }}
                                   />
                                 </div>
-                                <div>
-                                  <p className="font-bold text-slate-900">{prod.name}</p>
+                                <div className="min-w-0 space-y-0.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-900">{prod.name}</p>
+                                    {hasVariants && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] bg-purple-50 text-purple-700 font-bold text-[10px] border border-purple-200">
+                                        <Layers className="w-3 h-3" />
+                                        {prod.variants!.length} Variants
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-[10px] text-slate-400">
                                     ID: {prod.id.slice(0, 8)}
                                   </p>
@@ -821,9 +1114,22 @@ export default function ProductsPageClient() {
                               {prod.barcode || "—"}
                             </td>
 
-                            {/* Price */}
-                            <td className="py-3 px-4 text-right font-extrabold text-slate-900 text-sm">
-                              ₹ {Number(prod.price).toFixed(2)}
+                            {/* Price / Variations */}
+                            <td className="py-3 px-4 text-right">
+                              {hasVariants ? (
+                                <div>
+                                  <span className="font-extrabold text-slate-900 text-sm">
+                                    {minP === maxP ? `₹ ${minP.toFixed(2)}` : `₹ ${minP.toFixed(2)} - ₹ ${maxP.toFixed(2)}`}
+                                  </span>
+                                  <p className="text-[10px] text-purple-600 font-bold">
+                                    {prod.variants!.length} prices
+                                  </p>
+                                </div>
+                              ) : (
+                                <span className="font-extrabold text-slate-900 text-sm">
+                                  ₹ {Number(prod.price).toFixed(2)}
+                                </span>
+                              )}
                             </td>
 
                             {/* Buffer Stock */}
@@ -887,7 +1193,6 @@ export default function ProductsPageClient() {
                 {/* Pagination Controls */}
                 {filteredProducts.length > 0 && (
                   <div className="p-4 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                    {/* Left: Summary */}
                     <div className="text-slate-600 font-medium">
                       Showing{" "}
                       <span className="font-bold text-slate-900">
@@ -907,9 +1212,7 @@ export default function ProductsPageClient() {
                       </span>
                     </div>
 
-                    {/* Right: Page Buttons */}
                     <div className="flex items-center gap-1">
-                      {/* First Page */}
                       <button
                         type="button"
                         onClick={() => setCurrentPage(1)}
@@ -920,7 +1223,6 @@ export default function ProductsPageClient() {
                         <ChevronsLeft className="w-4 h-4" />
                       </button>
 
-                      {/* Previous Page */}
                       <button
                         type="button"
                         onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
@@ -932,7 +1234,6 @@ export default function ProductsPageClient() {
                         <span className="hidden sm:inline">Prev</span>
                       </button>
 
-                      {/* Numbered Page Buttons */}
                       <div className="flex items-center gap-1 px-1">
                         {Array.from({ length: totalPages }, (_, i) => i + 1)
                           .filter((pageNum) => {
@@ -963,7 +1264,6 @@ export default function ProductsPageClient() {
                           })}
                       </div>
 
-                      {/* Next Page */}
                       <button
                         type="button"
                         onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
@@ -975,7 +1275,6 @@ export default function ProductsPageClient() {
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* Last Page */}
                       <button
                         type="button"
                         onClick={() => setCurrentPage(totalPages)}
@@ -1041,7 +1340,6 @@ export default function ProductsPageClient() {
                           </div>
                         </td>
 
-                        {/* Number of products assigned to that collection */}
                         <td className="py-3.5 px-4 text-center">
                           <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-bold text-xs border border-blue-100">
                             <Package className="w-3.5 h-3.5" />
@@ -1049,7 +1347,6 @@ export default function ProductsPageClient() {
                           </span>
                         </td>
 
-                        {/* Status */}
                         <td className="py-3.5 px-4 text-center">
                           <span
                             className={`inline-flex items-center px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
@@ -1062,7 +1359,6 @@ export default function ProductsPageClient() {
                           </span>
                         </td>
 
-                        {/* Actions */}
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -1091,6 +1387,115 @@ export default function ProductsPageClient() {
             )}
           </div>
         )}
+
+        {/* TAB 3: VARIATIONS TABLE */}
+        {activeTab === "variations" && (
+          <div className="flex-1 overflow-auto scrollbar-thin">
+            {loading ? (
+              <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+                <p className="text-xs font-medium">Loading variations...</p>
+              </div>
+            ) : filteredVariations.length === 0 ? (
+              <div className="h-64 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+                <Layers className="w-10 h-10 text-slate-300 mb-2" />
+                <p className="text-sm font-bold text-slate-700">No variations found</p>
+                <p className="text-xs text-slate-400 max-w-sm mt-1">
+                  Add variations like Single Scoop, Double Scoop, 500ml, 1L, etc. Then each product can have its own individual price per variation!
+                </p>
+                <div className="mt-4 flex items-center gap-2 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => openVariationModal()}
+                    className="h-[36px] px-4 flex items-center gap-2 bg-blue-600 text-white rounded-[6px] text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add First Variation</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSeedDefaults}
+                    className="h-[36px] px-3.5 flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-[6px] text-xs font-semibold cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Load Standard Variations</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-5">
+                  <tr>
+                    <th className="py-3 px-4">Variation Name</th>
+                    <th className="py-3 px-4 text-center">Products Using This Variant</th>
+                    <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredVariations.map((v) => {
+                    const count = productCountByVariation[v.name] || 0;
+                    return (
+                      <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-[6px] bg-purple-50 text-purple-600 flex items-center justify-center font-bold text-xs">
+                              <Tag className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-900 text-sm">{v.name}</span>
+                              <p className="text-[10px] text-slate-400">Variant ID: {v.id.slice(0, 10)}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-purple-50 text-purple-700 font-bold text-xs border border-purple-100">
+                            <Package className="w-3.5 h-3.5" />
+                            {count} {count === 1 ? "Product" : "Products"}
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
+                              v.status === "active"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-slate-100 text-slate-600 border-slate-200"
+                            }`}
+                          >
+                            {v.status === "active" ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openVariationModal(v)}
+                              title="Edit Variation"
+                              className="h-[32px] w-[32px] flex items-center justify-center rounded-[6px] border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-slate-600 hover:text-blue-600 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteVariation(v.id, v.name)}
+                              title="Delete Variation"
+                              className="h-[32px] w-[32px] flex items-center justify-center rounded-[6px] border border-slate-200 hover:bg-red-50 hover:border-red-300 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -1098,21 +1503,24 @@ export default function ProductsPageClient() {
       {/* ========================================================================= */}
       {isProductModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-[6px] border border-slate-200 shadow-xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-[8px] border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-[6px] bg-blue-50 text-blue-600 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
                   <Package className="w-4 h-4" />
                 </div>
-                <h3 className="text-base font-bold text-slate-900">
-                  {editingProduct ? "Edit Product" : "Add New Product"}
-                </h3>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {editingProduct ? "Edit Product" : "Add New Product"}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Configure catalog details, pricing & variations</p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsProductModalOpen(false)}
-                className="h-[36px] w-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-100 cursor-pointer"
+                className="h-[34px] w-[34px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1159,7 +1567,7 @@ export default function ProductsPageClient() {
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="h-[36px] px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+                        className="h-[34px] px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-[6px] text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
                       >
                         Choose File
                       </button>
@@ -1170,9 +1578,9 @@ export default function ProductsPageClient() {
                             setImageFile(null);
                             setImagePreview(null);
                           }}
-                          className="h-[36px] px-3 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-[6px] border border-red-200 transition-colors cursor-pointer"
+                          className="h-[34px] px-3 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-[6px] border border-red-200 transition-colors cursor-pointer"
                         >
-                          Reset to Default Logo
+                          Reset to Default
                         </button>
                       )}
                     </div>
@@ -1196,7 +1604,7 @@ export default function ProductsPageClient() {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Aashirvaad Atta 1kg"
+                    placeholder="e.g. Belgian Chocolate, Fresh Milk, etc."
                     value={productName}
                     onChange={(e) => setProductName(e.target.value)}
                     className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -1221,8 +1629,153 @@ export default function ProductsPageClient() {
                 </div>
               </div>
 
-              {/* Price & Barcode ID */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* SECTION: VARIATIONS & MULTI-PRICING */}
+              <div className="p-3.5 bg-gradient-to-r from-purple-50/50 to-blue-50/40 rounded-[8px] border border-purple-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-[4px] bg-purple-600 text-white flex items-center justify-center font-bold">
+                      <Layers className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">Product Variations & Multi-Pricing</h4>
+                      <p className="text-[10px] text-slate-500">
+                        Enable if this item has multiple options (e.g. Single Scoop, Double Scoop, 500ml, etc.)
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={hasVariations}
+                      onChange={(e) => setHasVariations(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div
+                      onClick={() => setHasVariations(!hasVariations)}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                        hasVariations ? "bg-purple-600" : "bg-slate-300"
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          hasVariations ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-purple-900">
+                      {hasVariations ? "Variations ON" : "Simple Product"}
+                    </span>
+                  </label>
+                </div>
+
+                {/* If Variations Enabled: Show List of Variants with Prices */}
+                {hasVariations && (
+                  <div className="space-y-3 pt-1 border-t border-purple-200/80">
+                    <p className="text-[11px] text-purple-800 font-medium">
+                      Check the variations available for this product and set the price (₹) for each variant:
+                    </p>
+
+                    {formVariants.length === 0 ? (
+                      <div className="p-3 text-center bg-white rounded-[6px] border border-purple-200 text-xs text-slate-500">
+                        No variations created in the store yet. Add a variant name below:
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {formVariants.map((variantRow, idx) => (
+                          <div
+                            key={variantRow.name + idx}
+                            className={`p-2.5 rounded-[6px] border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                              variantRow.enabled
+                                ? "bg-white border-purple-400 shadow-2xs"
+                                : "bg-slate-50 border-slate-200 opacity-70"
+                            }`}
+                          >
+                            <label className="flex items-center gap-2.5 cursor-pointer min-w-[160px]">
+                              <input
+                                type="checkbox"
+                                checked={variantRow.enabled}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setFormVariants((prev) =>
+                                    prev.map((r, i) => (i === idx ? { ...r, enabled: checked } : r))
+                                  );
+                                }}
+                                className="w-4 h-4 text-purple-600 rounded-[3px] border-slate-300 focus:ring-purple-500 cursor-pointer"
+                              />
+                              <span className="font-bold text-slate-900 text-xs">{variantRow.name}</span>
+                            </label>
+
+                            {variantRow.enabled && (
+                              <div className="flex items-center gap-2 flex-1 justify-end">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs font-bold text-slate-500">₹</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    required
+                                    placeholder="Variant Price"
+                                    value={variantRow.price}
+                                    onChange={(e) => {
+                                      const val = e.target.value === "" ? "" : Number(e.target.value);
+                                      setFormVariants((prev) =>
+                                        prev.map((r, i) => (i === idx ? { ...r, price: val } : r))
+                                      );
+                                    }}
+                                    className="w-28 h-[32px] px-2.5 bg-white border border-purple-300 rounded-[5px] text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                  />
+                                </div>
+
+                                <input
+                                  type="text"
+                                  placeholder="Variant Barcode (Opt)"
+                                  value={variantRow.barcode}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setFormVariants((prev) =>
+                                      prev.map((r, i) => (i === idx ? { ...r, barcode: val } : r))
+                                    );
+                                  }}
+                                  className="w-36 h-[32px] px-2 bg-slate-50 border border-slate-200 rounded-[5px] text-[11px] font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 hidden md:block"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Quick Add Custom Variant Inline Input */}
+                    <div className="pt-2 flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Add another variant option (e.g. 500ml, 1kg)..."
+                        value={newCustomVariantName}
+                        onChange={(e) => setNewCustomVariantName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddCustomVariantToForm();
+                          }
+                        }}
+                        className="flex-1 h-[34px] px-3 bg-white border border-purple-200 rounded-[6px] text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomVariantToForm}
+                        className="h-[34px] px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Option</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* If Single Product (No variations): Show Main Price Input */}
+              {!hasVariations && (
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Price (₹) <span className="text-red-500">*</span>
@@ -1240,77 +1793,72 @@ export default function ProductsPageClient() {
                     className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
                   />
                 </div>
+              )}
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-slate-700">
-                      Barcode ID <span className="text-[10px] font-normal text-slate-400">(Numerics only)</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={hasCustomBarcode}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setHasCustomBarcode(checked);
-                          if (!checked) {
-                            setProductBarcode(generateUniqueNumericBarcode());
-                          } else if (!productBarcode || productBarcode.length === 0) {
-                            setProductBarcode("");
-                          }
-                        }}
-                        className="w-3.5 h-3.5 text-blue-600 rounded-[3px] border-slate-300 focus:ring-blue-500 cursor-pointer"
-                      />
-                      <span className="text-[11px] font-semibold text-blue-600 hover:text-blue-700">
-                        Has barcode
-                      </span>
-                    </label>
-                  </div>
-
-                  <div className="relative">
+              {/* Barcode ID */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Primary Barcode ID <span className="text-[10px] font-normal text-slate-400">(Numerics only)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      readOnly={!hasCustomBarcode}
-                      placeholder={hasCustomBarcode ? "Enter numeric barcode..." : "Auto-generating unique barcode..."}
-                      value={productBarcode}
+                      type="checkbox"
+                      checked={hasCustomBarcode}
                       onChange={(e) => {
-                        if (hasCustomBarcode) {
-                          // Allow only numeric digits
-                          const numericOnly = e.target.value.replace(/\D/g, "");
-                          setProductBarcode(numericOnly);
+                        const checked = e.target.checked;
+                        setHasCustomBarcode(checked);
+                        if (!checked) {
+                          setProductBarcode(generateUniqueNumericBarcode());
+                        } else if (!productBarcode || productBarcode.length === 0) {
+                          setProductBarcode("");
                         }
                       }}
-                      className={`w-full h-[36px] px-3 border rounded-[6px] text-xs font-mono font-bold transition-all ${
-                        hasCustomBarcode
-                          ? "bg-white border-blue-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          : "bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed select-none"
-                      }`}
+                      className="w-3.5 h-3.5 text-blue-600 rounded-[3px] border-slate-300 focus:ring-blue-500 cursor-pointer"
                     />
-                    {!hasCustomBarcode && (
-                      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setProductBarcode(generateUniqueNumericBarcode())}
-                          title="Generate new unique barcode"
-                          className="h-[26px] px-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-[4px] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5" />
-                          <span>Regenerate</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {hasCustomBarcode
-                      ? "Custom barcode active. Type or scan numeric barcode on the package."
-                      : "Auto-generated unique numeric barcode (read-only). Check 'Has barcode' above to enter custom."}
-                  </p>
+                    <span className="text-[11px] font-semibold text-blue-600 hover:text-blue-700">
+                      Has barcode
+                    </span>
+                  </label>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    readOnly={!hasCustomBarcode}
+                    placeholder={hasCustomBarcode ? "Enter numeric barcode..." : "Auto-generating unique barcode..."}
+                    value={productBarcode}
+                    onChange={(e) => {
+                      if (hasCustomBarcode) {
+                        const numericOnly = e.target.value.replace(/\D/g, "");
+                        setProductBarcode(numericOnly);
+                      }
+                    }}
+                    className={`w-full h-[36px] px-3 border rounded-[6px] text-xs font-mono font-bold transition-all ${
+                      hasCustomBarcode
+                        ? "bg-white border-blue-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        : "bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed select-none"
+                    }`}
+                  />
+                  {!hasCustomBarcode && (
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setProductBarcode(generateUniqueNumericBarcode())}
+                        title="Generate new unique barcode"
+                        className="h-[26px] px-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-[4px] text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <RefreshCw className="w-2.5 h-2.5" />
+                        <span>Regenerate</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Buffer Stock (Alert Threshold) */}
+              {/* Buffer Stock */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Buffer Stock (Alert Threshold)
@@ -1398,7 +1946,6 @@ export default function ProductsPageClient() {
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="bg-white rounded-[6px] border border-slate-200 shadow-xl max-w-md w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-[6px] bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -1417,7 +1964,6 @@ export default function ProductsPageClient() {
               </button>
             </div>
 
-            {/* Modal Form */}
             <form onSubmit={handleSaveCategory} className="p-5 space-y-4 text-xs">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1448,7 +1994,6 @@ export default function ProductsPageClient() {
                 />
               </div>
 
-              {/* Action Buttons */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
@@ -1479,6 +2024,92 @@ export default function ProductsPageClient() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* ADD / EDIT VARIATION MODAL */}
+      {/* ========================================================================= */}
+      {isVariationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-[6px] border border-slate-200 shadow-xl max-w-md w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-[6px] bg-purple-50 text-purple-600 flex items-center justify-center">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {editingVariation ? "Edit Variation" : "Add New Variation"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVariationModalOpen(false)}
+                className="h-[36px] w-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveVariation} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Variation Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Single Scoop, Double Scoop, 500ml, 1kg, Large..."
+                  value={variationName}
+                  onChange={(e) => setVariationName(e.target.value)}
+                  className="w-full h-[36px] px-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Status
+                </label>
+                <CustomSelect
+                  value={variationStatus}
+                  onChange={(val) => setVariationStatus(val as any)}
+                  options={[
+                    { value: "active", label: "Active" },
+                    { value: "inactive", label: "Inactive" },
+                  ]}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsVariationModalOpen(false)}
+                  className="h-[36px] px-4 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-[6px] text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="h-[36px] px-5 bg-purple-600 hover:bg-purple-700 text-white rounded-[6px] text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Save Variation</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* BULK IMPORT MODAL */}
       {/* ========================================================================= */}
@@ -1493,7 +2124,7 @@ export default function ProductsPageClient() {
       {/* ========================================================================= */}
       {viewProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-[8px] border border-slate-200 shadow-2xl max-w-md w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-[8px] border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
@@ -1513,7 +2144,7 @@ export default function ProductsPageClient() {
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
+            <div className="p-5 space-y-4 text-xs overflow-y-auto max-h-[75vh]">
               {/* Image & Main Info */}
               <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-[8px] border border-slate-200">
                 <div className="w-20 h-20 rounded-[6px] bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center p-1 shadow-2xs">
@@ -1532,7 +2163,9 @@ export default function ProductsPageClient() {
                   </span>
                   <h4 className="text-sm font-bold text-slate-900 leading-snug">{viewProduct.name}</h4>
                   <p className="text-base font-extrabold text-slate-900 font-mono">
-                    ₹ {Number(viewProduct.price).toFixed(2)}
+                    {viewProduct.hasVariations && viewProduct.variants && viewProduct.variants.length > 0
+                      ? `From ₹ ${Math.min(...viewProduct.variants.map((v) => v.price)).toFixed(2)}`
+                      : `₹ ${Number(viewProduct.price).toFixed(2)}`}
                   </p>
                 </div>
               </div>
@@ -1561,6 +2194,31 @@ export default function ProductsPageClient() {
                   </p>
                 </div>
               </div>
+
+              {/* Available Variations Table if product has variants */}
+              {viewProduct.hasVariations && viewProduct.variants && viewProduct.variants.length > 0 && (
+                <div className="p-3 bg-purple-50/60 rounded-[8px] border border-purple-200 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-purple-600" />
+                    <span className="font-bold text-purple-900 text-xs">
+                      Available Variations ({viewProduct.variants.length})
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-[6px] border border-purple-200 overflow-hidden divide-y divide-purple-100">
+                    {viewProduct.variants.map((v, idx) => (
+                      <div key={idx} className="p-2 flex items-center justify-between text-xs">
+                        <div>
+                          <p className="font-bold text-slate-900">{v.name}</p>
+                          {v.barcode && <p className="text-[10px] text-slate-400 font-mono">Barcode: {v.barcode}</p>}
+                        </div>
+                        <span className="font-extrabold text-purple-900 font-mono text-sm">
+                          ₹ {Number(v.price).toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">

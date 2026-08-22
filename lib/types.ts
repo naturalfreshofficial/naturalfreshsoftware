@@ -10,6 +10,47 @@ export interface Customer {
   updatedAt?: any;
 }
 
+export interface CategoryItem {
+  id: string;
+  name: string;
+  status: "active" | "inactive";
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface ProductVariant {
+  id: string;
+  name: string;
+  price: number;
+  barcode?: string;
+  status?: "active" | "inactive";
+}
+
+export interface VariationItem {
+  id: string;
+  name: string;
+  status: "active" | "inactive";
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface ProductItem {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  barcode: string;
+  isFavorite: boolean;
+  stock: number;
+  bufferStock: number;
+  status: "active" | "inactive";
+  imageUrl?: string;
+  hasVariations?: boolean;
+  variants?: ProductVariant[];
+  createdAt?: any;
+  updatedAt?: any;
+}
+
 export interface InvoiceItem {
   productId: string;
   name: string;
@@ -18,6 +59,8 @@ export interface InvoiceItem {
   barcode?: string;
   imageUrl?: string;
   total: number;
+  variantId?: string;
+  variantName?: string;
 }
 
 export interface Invoice {

@@ -17,13 +17,12 @@ import {
   increment,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Customer, Invoice, InvoiceItem } from "@/lib/types";
+import { Customer, Invoice, InvoiceItem, ProductVariant, Branch } from "@/lib/types";
 import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
 import { usePrinter } from "@/lib/PrinterContext";
 import {
   Search,
-
   LayoutGrid,
   List,
   Plus,
@@ -53,8 +52,9 @@ import {
   FolderOpen,
   Store,
   ShoppingBag,
+  Layers,
+  Tag,
 } from "lucide-react";
-import { Branch } from "@/lib/types";
 
 export interface POSProduct {
   id: string;
@@ -67,10 +67,14 @@ export interface POSProduct {
   status: "active" | "inactive";
   imageUrl?: string;
   isFavorite?: boolean;
+  hasVariations?: boolean;
+  variants?: ProductVariant[];
 }
 
 export interface POSCartItem {
+  cartItemId: string; // `${product.id}_${variant?.name || 'base'}`
   product: POSProduct;
+  variant?: ProductVariant;
   quantity: number;
 }
 
@@ -110,6 +114,10 @@ export default function POSBillingView() {
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [categories, setCategories] = useState<string[]>(["All Categories"]);
   const [loadingProducts, setLoadingProducts] = useState(true);
+
+  // Variation Selection Modal State
+  const [selectedProductForVariants, setSelectedProductForVariants] = useState<POSProduct | null>(null);
+  const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
 
   // Customers dynamic state from Firestore
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -165,7 +173,6 @@ export default function POSBillingView() {
     return () => unsub();
   }, []);
 
-
   // 2. Subscribe to Branch Stocks in Firestore
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "branch_stocks"), (snapshot) => {
@@ -202,6 +209,8 @@ export default function POSBillingView() {
               status: data.status || "active",
               imageUrl: data.imageUrl || "/logo.png",
               isFavorite: Boolean(data.isFavorite),
+              hasVariations: Boolean(data.hasVariations),
+              variants: Array.isArray(data.variants) ? data.variants : [],
             });
           }
         });
@@ -216,7 +225,7 @@ export default function POSBillingView() {
     return () => unsub();
   }, []);
 
-  // 2. Subscribe to Categories in Firestore
+  // 4. Subscribe to Categories in Firestore
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "categories"), (snapshot) => {
       const catList: string[] = ["All Categories"];
@@ -231,7 +240,7 @@ export default function POSBillingView() {
     return () => unsub();
   }, []);
 
-  // 3. Subscribe to Customers in Firestore
+  // 5. Subscribe to Customers in Firestore
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "customers"), (snapshot) => {
       const custs: Customer[] = [];
@@ -243,7 +252,7 @@ export default function POSBillingView() {
     return () => unsub();
   }, []);
 
-  // 4. Subscribe to Draft Bills in Firestore (status === "draft")
+  // 6. Subscribe to Draft Bills in Firestore (status === "draft")
   useEffect(() => {
     const q = query(
       collection(db, "invoices"),
@@ -284,7 +293,6 @@ export default function POSBillingView() {
     return branchStockMap[key] !== undefined ? branchStockMap[key] : 0;
   };
 
-
   // Close customer dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -306,7 +314,12 @@ export default function POSBillingView() {
         selectedCategory === "All Categories" || product.category === selectedCategory;
       const matchesSearch =
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.barcode.includes(searchQuery);
+        product.barcode.includes(searchQuery) ||
+        (product.hasVariations &&
+          product.variants?.some((v) =>
+            v.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (v.barcode && v.barcode.includes(searchQuery))
+          ));
       return matchesCategory && matchesSearch;
     });
   }, [products, selectedCategory, searchQuery]);
@@ -323,27 +336,49 @@ export default function POSBillingView() {
     );
   }, [customers, customerSearchQuery]);
 
-  // Cart Quantities Map (for fast lookup to show active view in grid)
-  const cartQuantities = useMemo(() => {
+  // Total in-cart count per product (sum across all variants)
+  const cartProductQuantities = useMemo(() => {
     const map = new Map<string, number>();
     cart.forEach((item) => {
-      map.set(item.product.id, item.quantity);
+      const current = map.get(item.product.id) || 0;
+      map.set(item.product.id, current + item.quantity);
     });
     return map;
   }, [cart]);
 
-  // Cart Actions with branch stock check
-  const addToCart = (product: POSProduct) => {
+  // In-cart count per specific cart item (product + variant combo)
+  const cartItemQuantities = useMemo(() => {
+    const map = new Map<string, number>();
+    cart.forEach((item) => {
+      map.set(item.cartItemId, item.quantity);
+    });
+    return map;
+  }, [cart]);
+
+  // Cart Actions with branch stock check and variation support
+  const addToCart = (product: POSProduct, variant?: ProductVariant) => {
+    // If product has variations and no specific variant is passed, open variant modal!
+    if (!variant && product.hasVariations && product.variants && product.variants.length > 0) {
+      setSelectedProductForVariants(product);
+      setIsVariantModalOpen(true);
+      return;
+    }
+
     const availableStock = getProductStockForSelectedBranch(product.id, product.stock);
-    const existing = cart.find((item) => item.product.id === product.id);
-    const currentQty = existing ? existing.quantity : 0;
+    const cartItemId = variant ? `${product.id}_${variant.name}` : product.id;
+    const existing = cart.find((item) => item.cartItemId === cartItemId);
+    
+    // Total quantity of this product currently in cart across all variants
+    const currentTotalProductQtyInCart = cart
+      .filter((item) => item.product.id === product.id)
+      .reduce((sum, item) => sum + item.quantity, 0);
 
     if (availableStock <= 0) {
       toast.warning(`"${product.name}" is OUT OF STOCK at ${selectedBranch?.name || "this branch"}.`);
       return;
     }
 
-    if (currentQty + 1 > availableStock) {
+    if (currentTotalProductQtyInCart + 1 > availableStock) {
       toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
       return;
     }
@@ -351,20 +386,27 @@ export default function POSBillingView() {
     setCart((prev) => {
       if (existing) {
         return prev.map((item) =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.cartItemId === cartItemId ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { cartItemId, product, variant, quantity: 1 }];
     });
+
+    const itemDisplayName = variant ? `${product.name} (${variant.name})` : product.name;
+    toast.success(`Added ${itemDisplayName} to cart!`);
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
-    const itemInCart = cart.find((item) => item.product.id === productId);
+  const updateQuantity = (cartItemId: string, delta: number) => {
+    const itemInCart = cart.find((item) => item.cartItemId === cartItemId);
     if (!itemInCart) return;
 
     if (delta > 0) {
-      const availableStock = getProductStockForSelectedBranch(productId, itemInCart.product.stock);
-      if (itemInCart.quantity + delta > availableStock) {
+      const availableStock = getProductStockForSelectedBranch(itemInCart.product.id, itemInCart.product.stock);
+      const totalProductQty = cart
+        .filter((item) => item.product.id === itemInCart.product.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+
+      if (totalProductQty + delta > availableStock) {
         toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
         return;
       }
@@ -373,7 +415,7 @@ export default function POSBillingView() {
     setCart((prev) =>
       prev
         .map((item) => {
-          if (item.product.id === productId) {
+          if (item.cartItemId === cartItemId) {
             const newQty = item.quantity + delta;
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }
@@ -383,8 +425,8 @@ export default function POSBillingView() {
     );
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  const removeFromCart = (cartItemId: string) => {
+    setCart((prev) => prev.filter((item) => item.cartItemId !== cartItemId));
   };
 
   const clearCart = () => {
@@ -402,7 +444,10 @@ export default function POSBillingView() {
   const totalGstRate = cgstPercent + sgstPercent;
 
   const totalItemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
-  const subtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
+  const subtotal = cart.reduce((acc, item) => {
+    const effectivePrice = item.variant ? item.variant.price : item.product.price;
+    return acc + effectivePrice * item.quantity;
+  }, 0);
   const discountAmount = (subtotal * discountPercent) / 100;
   const taxableAmount = Math.max(0, subtotal - discountAmount);
   const cgstAmount = isGstEnabled ? (taxableAmount * cgstPercent) / 100 : 0;
@@ -438,14 +483,12 @@ export default function POSBillingView() {
       const docRef = await addDoc(collection(db, "customers"), newCustData);
       const createdCust: Customer = { id: docRef.id, ...newCustData };
 
-      // Auto-select this newly created customer!
       setSelectedCustomer(createdCust);
       setCustomerSearchQuery("");
       setIsCustomerDropdownOpen(false);
       setIsAddCustomerModalOpen(false);
       toast.success(`Customer "${createdCust.name}" added & selected!`);
 
-      // Reset form
       setNewCustName("");
       setNewCustPhone("");
       setNewCustEmail("");
@@ -483,18 +526,30 @@ export default function POSBillingView() {
 
     setIsSubmittingBill(true);
     try {
-      const invoiceItems: InvoiceItem[] = cart.map((item) => ({
-        productId: item.product.id,
-        name: item.product.name,
-        price: item.product.price,
-        quantity: item.quantity,
-        barcode: item.product.barcode,
-        imageUrl: item.product.imageUrl || "/logo.png",
-        total: item.product.price * item.quantity,
-      }));
+      const invoiceItems: InvoiceItem[] = cart.map((item) => {
+        const itemPrice = item.variant ? item.variant.price : item.product.price;
+        const itemBarcode = item.variant?.barcode || item.product.barcode;
+        const itemName = item.variant
+          ? `${item.product.name} (${item.variant.name})`
+          : item.product.name;
+
+        return {
+          productId: item.product.id,
+          name: itemName,
+          price: itemPrice,
+          quantity: item.quantity,
+          barcode: itemBarcode,
+          imageUrl: item.product.imageUrl || "/logo.png",
+          total: itemPrice * item.quantity,
+          variantId: item.variant?.id || "",
+          variantName: item.variant?.name || "",
+        };
+      });
 
       const draftData: Partial<Invoice> = {
-        invoiceNumber: activeDraftId ? draftBills.find((d) => d.id === activeDraftId)?.invoiceNumber || generateInvoiceNumber() : generateInvoiceNumber(),
+        invoiceNumber: activeDraftId
+          ? draftBills.find((d) => d.id === activeDraftId)?.invoiceNumber || generateInvoiceNumber()
+          : generateInvoiceNumber(),
         customer: {
           id: selectedCustomer.id,
           name: selectedCustomer.name,
@@ -516,17 +571,15 @@ export default function POSBillingView() {
         sgstAmount,
         totalPayable,
         paymentMethod,
-        status: "draft", // Will NOT count towards completed sales reports
+        status: "draft",
         note: note.trim() || "",
         updatedAt: serverTimestamp(),
       };
 
       if (activeDraftId) {
-        // Update existing draft
         await updateDoc(doc(db, "invoices", activeDraftId), draftData as any);
         toast.success("Draft bill updated successfully!");
       } else {
-        // Create new draft
         await addDoc(collection(db, "invoices"), {
           ...draftData,
           createdAt: serverTimestamp(),
@@ -546,10 +599,17 @@ export default function POSBillingView() {
 
   // LOAD SAVED DRAFT BILL
   const handleLoadDraftBill = (draft: Invoice) => {
-    // 1. Reconstruct cart items with product objects
     const restoredCart: POSCartItem[] = draft.items.map((item) => {
       const existingProduct = products.find((p) => p.id === item.productId);
+      const matchedVariant = existingProduct?.variants?.find(
+        (v) => v.name === item.variantName || v.id === item.variantId
+      );
+      const cartItemId = item.variantName
+        ? `${item.productId}_${item.variantName}`
+        : item.productId;
+
       return {
+        cartItemId,
         product: existingProduct || {
           id: item.productId,
           name: item.name,
@@ -560,6 +620,7 @@ export default function POSBillingView() {
           status: "active",
           imageUrl: item.imageUrl || "/logo.png",
         },
+        variant: matchedVariant || (item.variantName ? { id: item.variantId || "", name: item.variantName, price: item.price } : undefined),
         quantity: item.quantity,
       };
     });
@@ -570,7 +631,6 @@ export default function POSBillingView() {
     setPaymentMethod(draft.paymentMethod || "UPI");
     setActiveDraftId(draft.id);
 
-    // 2. Set customer
     if (draft.customer) {
       setSelectedCustomer({
         id: draft.customer.id || "",
@@ -617,15 +677,25 @@ export default function POSBillingView() {
     setIsSubmittingBill(true);
     try {
       const invoiceNumber = generateInvoiceNumber();
-      const invoiceItems: InvoiceItem[] = cart.map((item) => ({
-        productId: item.product.id,
-        name: item.product.name,
-        price: item.product.price,
-        quantity: item.quantity,
-        barcode: item.product.barcode,
-        imageUrl: item.product.imageUrl || "/logo.png",
-        total: item.product.price * item.quantity,
-      }));
+      const invoiceItems: InvoiceItem[] = cart.map((item) => {
+        const itemPrice = item.variant ? item.variant.price : item.product.price;
+        const itemBarcode = item.variant?.barcode || item.product.barcode;
+        const itemName = item.variant
+          ? `${item.product.name} (${item.variant.name})`
+          : item.product.name;
+
+        return {
+          productId: item.product.id,
+          name: itemName,
+          price: itemPrice,
+          quantity: item.quantity,
+          barcode: itemBarcode,
+          imageUrl: item.product.imageUrl || "/logo.png",
+          total: itemPrice * item.quantity,
+          variantId: item.variant?.id || "",
+          variantName: item.variant?.name || "",
+        };
+      });
 
       const invoiceData = {
         invoiceNumber,
@@ -661,7 +731,7 @@ export default function POSBillingView() {
       // 1. Create completed invoice
       const invoiceRef = await addDoc(collection(db, "invoices"), invoiceData);
 
-      // 2. If it was an existing draft, delete the old draft record
+      // 2. If it was an existing draft, delete old draft record
       if (activeDraftId) {
         try {
           await deleteDoc(doc(db, "invoices", activeDraftId));
@@ -675,13 +745,11 @@ export default function POSBillingView() {
         const batch = writeBatch(db);
         cart.forEach((item) => {
           if (item.product.id) {
-            // Decrement total product stock
             const prodRef = doc(db, "products", item.product.id);
             batch.update(prodRef, {
               stock: increment(-item.quantity),
             });
 
-            // Decrement specific branch stock
             if (selectedBranch?.id) {
               const branchStockRef = doc(db, "branch_stocks", `${item.product.id}_${selectedBranch.id}`);
               batch.set(
@@ -726,7 +794,6 @@ export default function POSBillingView() {
       setIsReceiptModalOpen(true);
       toast.success(`Sale completed! Invoice ${invoiceNumber} created.`);
 
-      // Reset cart for next customer
       clearCart();
       setIsMobileCheckoutOpen(false);
     } catch (err: any) {
@@ -760,7 +827,7 @@ export default function POSBillingView() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Quick Thermal Printer Status (Hidden on extra small mobile screens) */}
+            {/* Thermal Printer Status */}
             <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-[5px] bg-slate-800 border border-slate-700 text-[11px]">
               <Printer className={`w-3.5 h-3.5 ${printer.isConnected ? "text-emerald-400" : "text-slate-400"}`} />
               <span className="text-slate-300 font-medium">
@@ -814,7 +881,7 @@ export default function POSBillingView() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search products by name or scan barcode..."
+              placeholder="Search products by name, variant, or scan barcode..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-[36px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -822,7 +889,6 @@ export default function POSBillingView() {
           </div>
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
-            {/* View Mode Toggle */}
             <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-[6px] border border-slate-200 h-[36px]">
               <button
                 type="button"
@@ -872,11 +938,13 @@ export default function POSBillingView() {
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3.5">
               {filteredProducts.map((product) => {
-                const inCartQty = cartQuantities.get(product.id) || 0;
-                const isSelectedInCart = inCartQty > 0;
+                const inCartTotalQty = cartProductQuantities.get(product.id) || 0;
+                const isSelectedInCart = inCartTotalQty > 0;
                 const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
                 const isOutOfStock = branchStock <= 0;
                 const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
+                const hasVariants = product.hasVariations && product.variants && product.variants.length > 0;
+                const minPrice = hasVariants ? Math.min(...product.variants!.map((v) => v.price)) : product.price;
 
                 return (
                   <div
@@ -894,7 +962,7 @@ export default function POSBillingView() {
                     {isSelectedInCart && (
                       <div className="absolute top-2 right-2 bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 z-2">
                         <Check className="w-3 h-3" />
-                        <span>In Cart: {inCartQty}</span>
+                        <span>In Cart: {inCartTotalQty}</span>
                       </div>
                     )}
 
@@ -915,6 +983,14 @@ export default function POSBillingView() {
                           </span>
                         </div>
                       )}
+
+                      {/* Multi-variant indicator badge on image */}
+                      {hasVariants && !isOutOfStock && (
+                        <div className="absolute bottom-1.5 left-1.5 bg-purple-600/95 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-[3px] shadow-xs flex items-center gap-1">
+                          <Layers className="w-2.5 h-2.5" />
+                          <span>{product.variants!.length} Options</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Details */}
@@ -924,7 +1000,7 @@ export default function POSBillingView() {
                       </h3>
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-extrabold text-slate-900">
-                          ₹ {Number(product.price).toFixed(2)}
+                          {hasVariants ? `From ₹ ${minPrice.toFixed(2)}` : `₹ ${Number(product.price).toFixed(2)}`}
                         </p>
                         <span className="text-[10px] text-slate-400 font-mono">
                           {product.barcode.slice(-5) || "—"}
@@ -954,11 +1030,13 @@ export default function POSBillingView() {
           ) : (
             <div className="space-y-2">
               {filteredProducts.map((product) => {
-                const inCartQty = cartQuantities.get(product.id) || 0;
-                const isSelectedInCart = inCartQty > 0;
+                const inCartTotalQty = cartProductQuantities.get(product.id) || 0;
+                const isSelectedInCart = inCartTotalQty > 0;
                 const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
                 const isOutOfStock = branchStock <= 0;
                 const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
+                const hasVariants = product.hasVariations && product.variants && product.variants.length > 0;
+                const minPrice = hasVariants ? Math.min(...product.variants!.map((v) => v.price)) : product.price;
 
                 return (
                   <div
@@ -984,7 +1062,14 @@ export default function POSBillingView() {
                         />
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-800">{product.name}</h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-xs font-bold text-slate-800">{product.name}</h4>
+                          {hasVariants && (
+                            <span className="px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-bold text-[10px] border border-purple-200">
+                              {product.variants!.length} Options
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
                           <span>{product.category}</span>
                           <span>•</span>
@@ -1006,7 +1091,7 @@ export default function POSBillingView() {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-sm font-extrabold text-slate-900">
-                        ₹ {Number(product.price).toFixed(2)}
+                        {hasVariants ? `From ₹ ${minPrice.toFixed(2)}` : `₹ ${Number(product.price).toFixed(2)}`}
                       </span>
                       <button
                         type="button"
@@ -1016,10 +1101,18 @@ export default function POSBillingView() {
                             ? "bg-slate-100 text-slate-400 cursor-not-allowed"
                             : isSelectedInCart
                             ? "bg-blue-600 text-white"
+                            : hasVariants
+                            ? "bg-purple-50 text-purple-700 hover:bg-purple-600 hover:text-white"
                             : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                         }`}
                       >
-                        {isOutOfStock ? "Unavailable" : isSelectedInCart ? `In Cart (${inCartQty})` : "+ Add"}
+                        {isOutOfStock
+                          ? "Unavailable"
+                          : isSelectedInCart
+                          ? `In Cart (${inCartTotalQty})`
+                          : hasVariants
+                          ? "Select Option"
+                          : "+ Add"}
                       </button>
                     </div>
                   </div>
@@ -1045,53 +1138,40 @@ export default function POSBillingView() {
             )}
           </div>
 
-          {/* Saved Draft Bills Button */}
           <button
             type="button"
             onClick={() => setIsDraftsModalOpen(true)}
-            title="View saved draft bills"
-            className="h-[34px] flex items-center gap-1.5 px-2.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-[6px] shadow-2xs transition-colors cursor-pointer relative"
+            title="Saved Draft Bills"
+            className="h-[32px] px-2.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-[5px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
           >
             <Bookmark className="w-3.5 h-3.5 text-blue-600" />
-            <span>Drafts</span>
-            {draftBills.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded-full text-[10px] font-bold">
-                {draftBills.length}
-              </span>
-            )}
+            <span>Drafts ({draftBills.length})</span>
           </button>
         </div>
 
-        {/* CUSTOMER SELECTION BAR (MANDATORY REQUIREMENT) */}
-        <div className="p-4 border-b border-slate-100 bg-white relative" ref={customerDropdownRef}>
+        {/* Customer Selector Card */}
+        <div ref={customerDropdownRef} className="p-4 border-b border-slate-100 bg-white">
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-              <span>Customer</span>
-              <span className="text-red-500">* (Mandatory)</span>
+            <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
+              <span>Customer Details</span>
+              <span className="text-red-500">*</span>
             </label>
-            <button
-              type="button"
-              onClick={() => setIsAddCustomerModalOpen(true)}
-              className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3 h-3" />
-              <span>Add New Customer</span>
-            </button>
+            {!selectedCustomer && (
+              <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">
+                Required for billing
+              </span>
+            )}
           </div>
 
           {selectedCustomer ? (
-            /* Selected Customer Active Card */
-            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-[6px] flex items-center justify-between">
+            <div className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-[6px] flex items-center justify-between">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
                   {selectedCustomer.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0">
                   <p className="font-bold text-slate-900 text-xs truncate">{selectedCustomer.name}</p>
-                  <p className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
-                    <Phone className="w-2.5 h-2.5" />
-                    <span>{selectedCustomer.phone}</span>
-                  </p>
+                  <p className="text-[11px] text-slate-500 font-mono">{selectedCustomer.phone}</p>
                 </div>
               </div>
               <button
@@ -1104,7 +1184,6 @@ export default function POSBillingView() {
               </button>
             </div>
           ) : (
-            /* Customer Search Input & Dropdown */
             <div className="relative">
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-[36px] flex items-center gap-2 px-3 bg-slate-50 border border-slate-300 focus-within:border-blue-500 focus-within:bg-white rounded-[6px] transition-all">
@@ -1141,7 +1220,6 @@ export default function POSBillingView() {
                 </button>
               </div>
 
-              {/* Customer Auto-complete Dropdown Menu */}
               {isCustomerDropdownOpen && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-[6px] shadow-xl z-20 max-h-56 overflow-y-auto divide-y divide-slate-100 scrollbar-thin animate-in fade-in zoom-in-95 duration-100">
                   {filteredCustomers.length === 0 ? (
@@ -1205,13 +1283,14 @@ export default function POSBillingView() {
             </div>
           ) : (
             cart.map((item) => {
-              const itemTotal = item.product.price * item.quantity;
+              const effectivePrice = item.variant ? item.variant.price : item.product.price;
+              const itemTotal = effectivePrice * item.quantity;
               return (
                 <div
-                  key={item.product.id}
+                  key={item.cartItemId}
                   className="grid grid-cols-12 items-center gap-1 text-xs text-slate-800 border-b border-slate-100 pb-2.5"
                 >
-                  {/* Item info */}
+                  {/* Item info with variation badge */}
                   <div className="col-span-5 flex items-center gap-2 min-w-0 pr-1">
                     <div className="w-7 h-7 bg-slate-50 rounded-[4px] border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
                       <img
@@ -1225,7 +1304,15 @@ export default function POSBillingView() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-bold text-slate-900 truncate">{item.product.name}</p>
-                      <p className="text-[10px] text-slate-400 truncate">{item.product.barcode || "—"}</p>
+                      {item.variant ? (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded-[3px] bg-purple-50 text-purple-700 font-bold text-[9px] border border-purple-200">
+                            {item.variant.name}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 truncate">{item.product.barcode || "—"}</p>
+                      )}
                     </div>
                   </div>
 
@@ -1234,7 +1321,7 @@ export default function POSBillingView() {
                     <div className="h-[30px] flex items-center border border-slate-200 rounded-[5px] bg-white overflow-hidden shadow-2xs">
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, -1)}
+                        onClick={() => updateQuantity(item.cartItemId, -1)}
                         className="h-full px-1.5 hover:bg-slate-100 text-slate-500 cursor-pointer flex items-center justify-center"
                       >
                         <Minus className="w-3 h-3" />
@@ -1244,7 +1331,7 @@ export default function POSBillingView() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, 1)}
+                        onClick={() => updateQuantity(item.cartItemId, 1)}
                         className="h-full px-1.5 hover:bg-slate-100 text-slate-500 cursor-pointer flex items-center justify-center"
                       >
                         <Plus className="w-3 h-3" />
@@ -1254,7 +1341,7 @@ export default function POSBillingView() {
 
                   {/* Price */}
                   <div className="col-span-2 text-right font-medium text-slate-600 text-[11px]">
-                    ₹ {Number(item.product.price).toFixed(2)}
+                    ₹ {Number(effectivePrice).toFixed(2)}
                   </div>
 
                   {/* Total & Trash */}
@@ -1262,7 +1349,7 @@ export default function POSBillingView() {
                     <span>₹ {itemTotal.toFixed(2)}</span>
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.product.id)}
+                      onClick={() => removeFromCart(item.cartItemId)}
                       className="h-[24px] w-[24px] flex items-center justify-center text-slate-300 hover:text-red-500 rounded-[4px] transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -1299,91 +1386,92 @@ export default function POSBillingView() {
           <div className="flex items-center justify-between text-slate-600">
             <div className="flex items-center gap-2">
               <span>Discount</span>
-              <div className="h-[28px] flex items-center bg-white border border-slate-200 rounded-[4px] px-1.5 text-[11px]">
-                <span className="text-slate-400 font-semibold">%</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={discountPercent}
-                  onChange={(e) => setDiscountPercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                  className="w-8 text-right font-bold text-slate-800 focus:outline-none ml-1"
-                />
+              <div className="flex items-center gap-1">
+                {[0, 5, 10, 15].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDiscountPercent(d)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                      discountPercent === d
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    {d}%
+                  </button>
+                ))}
               </div>
             </div>
-            <span className="font-bold text-red-500">- ₹ {discountAmount.toFixed(2)}</span>
+            <span className="font-semibold text-red-600">- ₹ {discountAmount.toFixed(2)}</span>
           </div>
 
-          <div className="flex items-center justify-between text-slate-600 font-medium">
-            <span>GST Tax (5%)</span>
-            <span className="font-bold text-slate-800">₹ {gstTax.toFixed(2)}</span>
-          </div>
+          {isGstEnabled && (
+            <div className="flex items-center justify-between text-slate-600">
+              <span className="flex items-center gap-1">
+                <span>GST Tax</span>
+                <span className="text-[10px] text-slate-400">({totalGstRate}%)</span>
+              </span>
+              <span className="font-semibold text-slate-700">₹ {gstTax.toFixed(2)}</span>
+            </div>
+          )}
 
-          <div className="border-t border-slate-200 pt-2 flex items-center justify-between">
-            <span className="text-sm font-bold text-slate-900">Total Payable</span>
-            <span className="text-lg font-black text-slate-950">₹ {totalPayable.toFixed(2)}</span>
+          <div className="border-t border-slate-200 pt-2 flex items-center justify-between text-slate-900">
+            <span className="text-sm font-bold">Total Payable</span>
+            <span className="text-lg font-extrabold text-blue-600">₹ {totalPayable.toFixed(2)}</span>
           </div>
         </div>
 
-        {/* PAYMENT METHOD SELECTION & CHECKOUT ACTIONS */}
-        <div className="p-4 border-t border-slate-100 space-y-3.5 bg-white">
-          {/* Payment Mode Selector: UPI / Cash / Card */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Payment Method <span className="text-red-500">*</span>
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {/* UPI */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("UPI")}
-                className={`h-[42px] px-2 rounded-[6px] border flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
-                  paymentMethod === "UPI"
-                    ? "border-blue-600 bg-blue-50 text-blue-700 shadow-2xs ring-1 ring-blue-500"
-                    : "border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50"
-                }`}
-              >
-                <QrCode className="w-4 h-4 text-blue-600" />
-                <span>UPI</span>
-              </button>
+        {/* Payment Methods */}
+        <div className="p-4 border-t border-slate-100 bg-white space-y-3">
+          <label className="block text-xs font-bold text-slate-700">Select Payment Mode</label>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("UPI")}
+              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+                paymentMethod === "UPI"
+                  ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <QrCode className="w-4 h-4 text-purple-600" />
+              <span>UPI / QR</span>
+            </button>
 
-              {/* Cash */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("Cash")}
-                className={`h-[42px] px-2 rounded-[6px] border flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
-                  paymentMethod === "Cash"
-                    ? "border-emerald-600 bg-emerald-50 text-emerald-700 shadow-2xs ring-1 ring-emerald-500"
-                    : "border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50"
-                }`}
-              >
-                <Banknote className="w-4 h-4 text-emerald-600" />
-                <span>Cash</span>
-              </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("Cash")}
+              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+                paymentMethod === "Cash"
+                  ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Banknote className="w-4 h-4 text-emerald-600" />
+              <span>Cash</span>
+            </button>
 
-              {/* Card */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("Card")}
-                className={`h-[42px] px-2 rounded-[6px] border flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
-                  paymentMethod === "Card"
-                    ? "border-indigo-600 bg-indigo-50 text-indigo-700 shadow-2xs ring-1 ring-indigo-500"
-                    : "border-slate-200 hover:border-slate-300 text-slate-700 bg-slate-50/50"
-                }`}
-              >
-                <CreditCard className="w-4 h-4 text-indigo-600" />
-                <span>Card</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("Card")}
+              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+                paymentMethod === "Card"
+                  ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <CreditCard className="w-4 h-4 text-blue-600" />
+              <span>Card</span>
+            </button>
           </div>
 
-          {/* Action Buttons: Save to Draft & Proceed to Payment */}
-          <div className="grid grid-cols-2 gap-2.5 pt-1">
+          <div className="grid grid-cols-2 gap-2 pt-1">
             <button
               type="button"
               onClick={handleSaveToDraft}
               disabled={isSubmittingBill || cart.length === 0}
-              className="h-[40px] flex items-center justify-center gap-1.5 px-3 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-[6px] text-xs font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+              className="h-[42px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-[6px] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
             >
               <Bookmark className="w-4 h-4 text-amber-600" />
               <span>Save as Draft</span>
@@ -1393,7 +1481,7 @@ export default function POSBillingView() {
               type="button"
               onClick={handleCompleteSale}
               disabled={isSubmittingBill || cart.length === 0}
-              className="h-[40px] flex items-center justify-center gap-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-[42px] bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isSubmittingBill ? (
                 <>
@@ -1462,19 +1550,156 @@ export default function POSBillingView() {
       )}
 
       {/* ========================================================================= */}
+      {/* MODAL: VARIANT SELECTION POPUP ON ITEM CLICK */}
+      {/* ========================================================================= */}
+      {isVariantModalOpen && selectedProductForVariants && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-[10px] border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-purple-50/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-[6px] bg-purple-600 text-white flex items-center justify-center">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Select Variation</h3>
+                  <p className="text-[11px] text-purple-700 font-medium">
+                    {selectedProductForVariants.name} • {selectedProductForVariants.category}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsVariantModalOpen(false);
+                  setSelectedProductForVariants(null);
+                }}
+                className="h-[32px] w-[32px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Product Overview Card */}
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-3.5">
+              <div className="w-14 h-14 rounded-[6px] bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center p-1 shadow-2xs">
+                <img
+                  src={selectedProductForVariants.imageUrl || "/logo.png"}
+                  alt={selectedProductForVariants.name}
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "/logo.png";
+                  }}
+                />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-slate-900 leading-tight">
+                  {selectedProductForVariants.name}
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Available in {selectedProductForVariants.variants?.length || 0} variations. Tap any variation below to add to bill:
+                </p>
+              </div>
+            </div>
+
+            {/* Variations Grid / List */}
+            <div className="p-4 space-y-2.5 max-h-72 overflow-y-auto scrollbar-thin">
+              {selectedProductForVariants.variants?.map((v) => {
+                const cartKey = `${selectedProductForVariants.id}_${v.name}`;
+                const inCartQty = cartItemQuantities.get(cartKey) || 0;
+                const isSelected = inCartQty > 0;
+
+                return (
+                  <div
+                    key={v.name}
+                    onClick={() => {
+                      addToCart(selectedProductForVariants, v);
+                    }}
+                    className={`p-3.5 rounded-[8px] border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? "bg-purple-50/80 border-purple-500 ring-2 ring-purple-500/20 shadow-xs"
+                        : "bg-white border-slate-200 hover:border-purple-400 hover:bg-purple-50/20 hover:shadow-2xs"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                          isSelected
+                            ? "bg-purple-600 text-white"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        <Tag className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-bold text-slate-900">{v.name}</p>
+                          {isSelected && (
+                            <span className="px-1.5 py-0.2 bg-purple-600 text-white text-[9px] font-bold rounded-full">
+                              In Cart: {inCartQty}
+                            </span>
+                          )}
+                        </div>
+                        {v.barcode && (
+                          <p className="text-[10px] text-slate-400 font-mono">Barcode: {v.barcode}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-sm font-extrabold text-slate-900 font-mono">
+                        ₹ {Number(v.price).toFixed(2)}
+                      </span>
+                      <button
+                        type="button"
+                        className={`h-[30px] px-3 text-xs font-bold rounded-[6px] transition-colors cursor-pointer ${
+                          isSelected
+                            ? "bg-purple-600 text-white"
+                            : "bg-purple-50 text-purple-700 hover:bg-purple-600 hover:text-white"
+                        }`}
+                      >
+                        {isSelected ? `+ Add (${inCartQty})` : "+ Select"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Total in cart for item:{" "}
+                <strong className="text-slate-900 font-bold">
+                  {cartProductQuantities.get(selectedProductForVariants.id) || 0} units
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsVariantModalOpen(false);
+                  setSelectedProductForVariants(null);
+                }}
+                className="h-[34px] px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-[6px] text-xs font-bold cursor-pointer transition-colors shadow-xs"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MODAL 0: MOBILE FULL ORDER CHECKOUT DRAWER / MODAL */}
       {/* ========================================================================= */}
       {isMobileCheckoutOpen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end lg:hidden animate-in fade-in duration-200">
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm transition-opacity"
             onClick={() => setIsMobileCheckoutOpen(false)}
           />
 
-          {/* Modal Container (Bottom Sheet) */}
           <div className="relative bg-white w-full max-h-[92vh] rounded-t-[20px] shadow-2xl flex flex-col z-10 animate-in slide-in-from-bottom duration-300 overflow-hidden border-t border-slate-200">
-            {/* Header */}
             <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
@@ -1506,7 +1731,6 @@ export default function POSBillingView() {
               </div>
             </div>
 
-            {/* Scrollable Order Content */}
             <div className="overflow-y-auto p-4 space-y-4 flex-1">
               {/* Customer Selector */}
               <div className="p-3 bg-slate-50 rounded-[8px] border border-slate-200 space-y-2">
@@ -1591,44 +1815,52 @@ export default function POSBillingView() {
                 </div>
 
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {cart.map((item) => (
-                    <div
-                      key={item.product.id}
-                      className="p-2.5 bg-slate-50 rounded-[8px] border border-slate-200 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">
-                          ₹{item.product.price.toFixed(2)} × {item.quantity} = <strong className="text-slate-900 font-extrabold">₹{(item.product.price * item.quantity).toFixed(2)}</strong>
-                        </p>
-                      </div>
+                  {cart.map((item) => {
+                    const price = item.variant ? item.variant.price : item.product.price;
+                    return (
+                      <div
+                        key={item.cartItemId}
+                        className="p-2.5 bg-slate-50 rounded-[8px] border border-slate-200 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
+                          {item.variant && (
+                            <span className="inline-flex px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-bold text-[9px] border border-purple-200">
+                              {item.variant.name}
+                            </span>
+                          )}
+                          <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                            ₹{price.toFixed(2)} × {item.quantity} = <strong className="text-slate-900 font-extrabold">₹{(price * item.quantity).toFixed(2)}</strong>
+                          </p>
+                        </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.product.id, -1)}
-                          className="w-6 h-6 rounded bg-white border border-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="w-6 text-center font-mono font-bold text-xs">{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.product.id, 1)}
-                          className="w-6 h-6 rounded bg-blue-600 text-white flex items-center justify-center font-bold text-xs"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeFromCart(item.product.id)}
-                          className="w-6 h-6 rounded text-red-500 hover:bg-red-50 flex items-center justify-center ml-1"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.cartItemId, -1)}
+                            className="w-6 h-6 rounded bg-white border border-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="w-6 text-center font-mono font-bold text-xs">{item.quantity}</span>
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.cartItemId, 1)}
+                            className="w-6 h-6 rounded bg-blue-600 text-white flex items-center justify-center font-bold text-xs"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.cartItemId)}
+                            className="w-6 h-6 rounded text-red-500 hover:bg-red-50 flex items-center justify-center ml-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1655,7 +1887,7 @@ export default function POSBillingView() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment Mode</label>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment</label>
                   <div className="flex items-center gap-1">
                     {(["UPI", "Cash", "Card"] as const).map((mode) => (
                       <button
@@ -1664,7 +1896,7 @@ export default function POSBillingView() {
                         onClick={() => setPaymentMethod(mode)}
                         className={`flex-1 py-1 rounded text-[11px] font-bold border transition-colors ${
                           paymentMethod === mode
-                            ? "bg-emerald-600 text-white border-emerald-600"
+                            ? "bg-blue-600 text-white border-blue-600"
                             : "bg-white text-slate-700 border-slate-200"
                         }`}
                       >
@@ -1675,25 +1907,27 @@ export default function POSBillingView() {
                 </div>
               </div>
 
-              {/* Calculations Summary */}
-              <div className="p-3 bg-slate-50 rounded-[8px] border border-slate-200 space-y-1.5 text-xs">
+              {/* Total Calculation */}
+              <div className="p-3 bg-slate-100 rounded-[8px] space-y-1 text-xs">
                 <div className="flex justify-between text-slate-600">
                   <span>Subtotal</span>
-                  <span className="font-semibold font-mono">₹ {subtotal.toFixed(2)}</span>
+                  <span className="font-semibold text-slate-800">₹ {subtotal.toFixed(2)}</span>
                 </div>
                 {discountAmount > 0 && (
                   <div className="flex justify-between text-red-600">
                     <span>Discount ({discountPercent}%)</span>
-                    <span className="font-semibold font-mono">- ₹ {discountAmount.toFixed(2)}</span>
+                    <span className="font-semibold">- ₹ {discountAmount.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-slate-600">
-                  <span>GST (5%)</span>
-                  <span className="font-semibold font-mono">₹ {gstTax.toFixed(2)}</span>
-                </div>
-                <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-extrabold text-slate-900">
-                  <span>Total Payable:</span>
-                  <span className="text-base text-blue-600 font-mono">₹ {totalPayable.toFixed(2)}</span>
+                {isGstEnabled && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>GST ({totalGstRate}%)</span>
+                    <span className="font-semibold">₹ {gstTax.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="border-t border-slate-200 pt-1 flex justify-between text-sm font-extrabold text-slate-900">
+                  <span>Payable</span>
+                  <span className="text-blue-600 font-mono">₹ {totalPayable.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -1933,7 +2167,6 @@ export default function POSBillingView() {
       {isReceiptModalOpen && completedInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="bg-white rounded-[8px] border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Header */}
             <div className="p-4 bg-emerald-600 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-100" />
@@ -1948,9 +2181,7 @@ export default function POSBillingView() {
               </button>
             </div>
 
-            {/* Printable Receipt Area */}
             <div id="pos-printable-receipt" className="p-6 space-y-4 text-xs bg-white text-slate-800">
-              {/* Store Header */}
               <div className="text-center border-b border-dashed border-slate-300 pb-3">
                 <div className="w-12 h-12 mx-auto mb-1 rounded-[6px] overflow-hidden">
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
@@ -1965,7 +2196,6 @@ export default function POSBillingView() {
                 <p className="text-[11px] text-slate-500 font-mono">GSTIN: 37AAAAA0000A1Z5</p>
               </div>
 
-              {/* Invoice Metadata */}
               <div className="flex items-center justify-between text-[11px] border-b border-dashed border-slate-300 pb-2">
                 <div>
                   <p className="font-bold text-slate-900 font-mono">{completedInvoice.invoiceNumber}</p>
@@ -1977,7 +2207,6 @@ export default function POSBillingView() {
                 </div>
               </div>
 
-              {/* Items Table */}
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 text-[10px] font-bold uppercase">
@@ -1999,7 +2228,6 @@ export default function POSBillingView() {
                 </tbody>
               </table>
 
-              {/* Calculations Breakdown */}
               <div className="border-t border-dashed border-slate-300 pt-2 space-y-1 text-[11px]">
                 <div className="flex justify-between text-slate-600">
                   <span>Subtotal</span>
@@ -2025,14 +2253,12 @@ export default function POSBillingView() {
                 </div>
               </div>
 
-              {/* Footer Note */}
               <div className="text-center pt-2 text-[10px] text-slate-400 border-t border-dashed border-slate-200">
                 <p>Thank you for shopping with us!</p>
                 <p>Please visit again.</p>
               </div>
             </div>
 
-            {/* Actions */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
@@ -2042,7 +2268,6 @@ export default function POSBillingView() {
                 Close
               </button>
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                {/* Standard System Print */}
                 <button
                   type="button"
                   onClick={() => window.print()}
@@ -2052,7 +2277,6 @@ export default function POSBillingView() {
                   <span>System Print</span>
                 </button>
 
-                {/* Direct ESC/POS Thermal Print */}
                 {printer.isConnected ? (
                   <button
                     type="button"
