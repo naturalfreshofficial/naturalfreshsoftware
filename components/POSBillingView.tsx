@@ -19,8 +19,10 @@ import {
 import { db } from "@/lib/firebase";
 import { Customer, Invoice, InvoiceItem } from "@/lib/types";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import {
   Search,
+
   LayoutGrid,
   List,
   Plus,
@@ -72,11 +74,34 @@ export interface POSCartItem {
 
 export default function POSBillingView() {
   const toast = useToast();
+  const { user, selectedBranchId: authBranchId, setSelectedBranchId: setAuthBranchId } = useAuth();
+  
   // Branches state from Firestore
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   // Mapping of `${productId}_${branchId}` -> quantity
   const [branchStockMap, setBranchStockMap] = useState<Record<string, number>>({});
+
+  // Strictly filter branches accessible to the logged-in user
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
+  // Sync selected branch with available branches and auth context
+  useEffect(() => {
+    if (availableBranches.length > 0) {
+      if (authBranchId && availableBranches.some((b) => b.id === authBranchId)) {
+        setSelectedBranchId(authBranchId);
+      } else if (!availableBranches.some((b) => b.id === selectedBranchId)) {
+        const fallbackId = availableBranches[0].id;
+        setSelectedBranchId(fallbackId);
+        setAuthBranchId(fallbackId);
+      }
+    }
+  }, [availableBranches, authBranchId, selectedBranchId, setAuthBranchId]);
 
   // Products & Categories dynamic state from Firestore
   const [products, setProducts] = useState<POSProduct[]>([]);
@@ -132,17 +157,10 @@ export default function POSBillingView() {
       });
       bList.sort((a, b) => a.name.localeCompare(b.name));
       setBranches(bList);
-
-      // Auto select saved or first branch
-      const savedBranch = typeof window !== "undefined" ? localStorage.getItem("pos_selected_branch_id") : null;
-      if (savedBranch && bList.some((b) => b.id === savedBranch)) {
-        setSelectedBranchId(savedBranch);
-      } else if (bList.length > 0) {
-        setSelectedBranchId(bList[0].id);
-      }
     });
     return () => unsub();
   }, []);
+
 
   // 2. Subscribe to Branch Stocks in Firestore
   useEffect(() => {
@@ -246,20 +264,22 @@ export default function POSBillingView() {
   // Branch helpers
   const handleBranchChange = (branchId: string) => {
     setSelectedBranchId(branchId);
+    setAuthBranchId(branchId);
     if (typeof window !== "undefined") {
       localStorage.setItem("pos_selected_branch_id", branchId);
     }
   };
 
   const selectedBranch = useMemo(() => {
-    return branches.find((b) => b.id === selectedBranchId) || branches[0] || null;
-  }, [branches, selectedBranchId]);
+    return availableBranches.find((b) => b.id === selectedBranchId) || availableBranches[0] || null;
+  }, [availableBranches, selectedBranchId]);
 
   const getProductStockForSelectedBranch = (productId: string, fallbackStock: number): number => {
     if (!selectedBranchId) return fallbackStock;
     const key = `${productId}_${selectedBranchId}`;
     return branchStockMap[key] !== undefined ? branchStockMap[key] : 0;
   };
+
 
   // Close customer dropdown on outside click
   useEffect(() => {
@@ -721,13 +741,14 @@ export default function POSBillingView() {
               onChange={(e) => handleBranchChange(e.target.value)}
               className="h-[34px] px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-56"
             >
-              {branches.map((b) => (
+              {availableBranches.map((b) => (
                 <option key={b.id} value={b.id} className="bg-slate-900 text-white">
                   📍 {b.name}
                 </option>
               ))}
             </select>
           </div>
+
         </div>
 
         {/* Category Navigation Tabs */}

@@ -29,21 +29,43 @@ import {
   Users,
   Store,
 } from "lucide-react";
+
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import CustomSelect from "@/components/CustomSelect";
+
 
 export default function EmployeesPageClient() {
   const toast = useToast();
+  const { user } = useAuth();
 
   // Firestore Data State
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Available branches strictly filtered for staff
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
+
+  // Auto select first assigned branch for staff
+  useEffect(() => {
+    if (user?.role === "staff" && availableBranches.length > 0) {
+      if (selectedBranchFilter === "all" || !availableBranches.some((b) => b.id === selectedBranchFilter)) {
+        setSelectedBranchFilter(availableBranches[0].id);
+      }
+    }
+  }, [user, availableBranches, selectedBranchFilter]);
+
 
   // Add / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -339,13 +361,15 @@ export default function EmployeesPageClient() {
           </div>
 
           <div className="flex items-center gap-2.5 self-end sm:self-auto flex-wrap">
-            {branches.length > 0 && (
+            {availableBranches.length > 0 && (
               <CustomSelect
                 value={selectedBranchFilter}
                 onChange={(val) => setSelectedBranchFilter(val)}
                 options={[
-                  { value: "all", label: "All Branches" },
-                  ...branches.map((b) => ({ value: b.id, label: b.name })),
+                  ...(user?.role === "super_admin"
+                    ? [{ value: "all", label: "All Branches" }]
+                    : []),
+                  ...availableBranches.map((b) => ({ value: b.id, label: b.name })),
                 ]}
                 searchable={true}
                 align="right"
@@ -562,7 +586,7 @@ export default function EmployeesPageClient() {
                 <CustomSelect
                   value={branchId}
                   onChange={(val) => setBranchId(val)}
-                  options={branches.map((b) => ({
+                  options={availableBranches.map((b) => ({
                     value: b.id,
                     label: b.name,
                   }))}

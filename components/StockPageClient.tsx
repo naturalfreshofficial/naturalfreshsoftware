@@ -36,7 +36,9 @@ import {
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import CustomSelect from "@/components/CustomSelect";
+
 
 export type StockHealthStatus =
   | "crossed_buffer" // 🔴 Depleted past buffer (urgent restock)
@@ -58,12 +60,21 @@ export interface StockProduct {
 
 export default function StockPageClient() {
   const toast = useToast();
+  const { user } = useAuth();
   const [products, setProducts] = useState<StockProduct[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   // Mapping of `${productId}_${branchId}` -> quantity
   const [branchStockMap, setBranchStockMap] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<string[]>(["All Categories"]);
   const [loading, setLoading] = useState(true);
+
+  // Available branches filtered strictly by role
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -72,6 +83,16 @@ export default function StockPageClient() {
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<
     "all" | StockHealthStatus
   >("all");
+
+  // Auto select first assigned branch for staff
+  useEffect(() => {
+    if (user?.role === "staff" && availableBranches.length > 0) {
+      if (selectedBranchFilter === "all" || !availableBranches.some((b) => b.id === selectedBranchFilter)) {
+        setSelectedBranchFilter(availableBranches[0].id);
+      }
+    }
+  }, [user, availableBranches, selectedBranchFilter]);
+
 
   // Quick Stock Adjustment Modal State
   const [adjustingProduct, setAdjustingProduct] = useState<StockProduct | null>(null);
@@ -436,13 +457,16 @@ export default function StockPageClient() {
               value={selectedBranchFilter}
               onChange={(val) => setSelectedBranchFilter(val)}
               options={[
-                { value: "all", label: "🏢 All Branches (Consolidated)" },
-                ...branches.map((b) => ({ value: b.id, label: `📍 ${b.name}` })),
+                ...(user?.role === "super_admin"
+                  ? [{ value: "all", label: "🏢 All Branches (Consolidated)" }]
+                  : []),
+                ...availableBranches.map((b) => ({ value: b.id, label: `📍 ${b.name}` })),
               ]}
               searchable={true}
               className="w-56"
             />
           </div>
+
 
           <Link
             href="/stock-assignment"

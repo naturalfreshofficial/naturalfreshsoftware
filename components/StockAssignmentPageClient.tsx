@@ -29,7 +29,9 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import CustomSelect from "@/components/CustomSelect";
+
 
 interface ProductRow {
   id: string;
@@ -43,12 +45,23 @@ interface ProductRow {
 
 export default function StockAssignmentPageClient() {
   const toast = useToast();
+  const { user } = useAuth();
 
   // Firestore Data State
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+
+  // Filter branches strictly by user role & staff branchIds
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
   // Mapping of `${productId}_${branchId}` -> quantity in Firestore
   const [stockMap, setStockMap] = useState<Record<string, number>>({});
+
   // Local pending edits: `${productId}_${branchId}` -> quantity
   const [pendingEdits, setPendingEdits] = useState<Record<string, number>>({});
 
@@ -165,12 +178,12 @@ export default function StockAssignmentPageClient() {
 
   // Helper to check if a single product row has pending changes
   const hasRowPendingEdits = (productId: string): boolean => {
-    return branches.some((b) => pendingEdits[`${productId}_${b.id}`] !== undefined);
+    return availableBranches.some((b) => pendingEdits[`${productId}_${b.id}`] !== undefined);
   };
 
   // Helper to get total stock across all branches for a product
   const getProductTotalStock = (productId: string): number => {
-    return branches.reduce((sum, b) => sum + getBranchQty(productId, b.id), 0);
+    return availableBranches.reduce((sum, b) => sum + getBranchQty(productId, b.id), 0);
   };
 
   // Check if a row is editable
@@ -205,7 +218,7 @@ export default function StockAssignmentPageClient() {
   const handleDiscardRowEdits = (productId: string) => {
     setPendingEdits((prev) => {
       const updated = { ...prev };
-      branches.forEach((b) => {
+      availableBranches.forEach((b) => {
         delete updated[`${productId}_${b.id}`];
       });
       return updated;
@@ -224,7 +237,7 @@ export default function StockAssignmentPageClient() {
       const batch = writeBatch(db);
       let newTotal = 0;
 
-      branches.forEach((b) => {
+      availableBranches.forEach((b) => {
         const key = `${prod.id}_${b.id}`;
         const qty = pendingEdits[key] !== undefined ? pendingEdits[key] : (stockMap[key] || 0);
         newTotal += qty;
@@ -255,7 +268,7 @@ export default function StockAssignmentPageClient() {
       // Clear pending edits for this row
       setPendingEdits((prev) => {
         const updated = { ...prev };
-        branches.forEach((b) => {
+        availableBranches.forEach((b) => {
           delete updated[`${prod.id}_${b.id}`];
         });
         return updated;
@@ -347,7 +360,7 @@ export default function StockAssignmentPageClient() {
   const openDistributeModal = (prod: ProductRow) => {
     setSelectedProductForDistribute(prod);
     const initialBranchQtys: Record<string, number | ""> = {};
-    branches.forEach((b) => {
+    availableBranches.forEach((b) => {
       initialBranchQtys[b.id] = getBranchQty(prod.id, b.id);
     });
     setDistributeBranchQuantities(initialBranchQtys);
@@ -364,7 +377,7 @@ export default function StockAssignmentPageClient() {
       const batch = writeBatch(db);
       let newTotal = 0;
 
-      branches.forEach((b) => {
+      availableBranches.forEach((b) => {
         const qty = Number(distributeBranchQuantities[b.id]) || 0;
         newTotal += qty;
         const key = `${selectedProductForDistribute.id}_${b.id}`;
@@ -566,12 +579,12 @@ export default function StockAssignmentPageClient() {
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
               <p className="text-xs font-semibold">Loading stock assignments from Firestore...</p>
             </div>
-          ) : branches.length === 0 ? (
+          ) : availableBranches.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
               <Store className="w-10 h-10 text-slate-300 mb-2" />
-              <p className="text-sm font-bold text-slate-700">No active store branches found</p>
+              <p className="text-sm font-bold text-slate-700">No active store branches assigned</p>
               <p className="text-xs text-slate-400 max-w-sm mt-1">
-                Please create your store branches in the Branches page first before allocating stock.
+                You do not have any assigned branches for stock management.
               </p>
             </div>
           ) : filteredProducts.length === 0 ? (
@@ -591,7 +604,7 @@ export default function StockAssignmentPageClient() {
                   <th className="py-3.5 px-4 min-w-[280px]">Product Information</th>
 
                   {/* Dynamic Branch Columns */}
-                  {branches.map((b) => (
+                  {availableBranches.map((b) => (
                     <th
                       key={b.id}
                       className="py-3.5 px-4 text-center min-w-[130px] bg-blue-50/40 border-l border-r border-blue-100/60"
@@ -677,7 +690,7 @@ export default function StockAssignmentPageClient() {
                       </td>
 
                       {/* Dynamic Branch Quantity Inputs */}
-                      {branches.map((b) => {
+                      {availableBranches.map((b) => {
                         const key = `${prod.id}_${b.id}`;
                         const currentVal = getBranchQty(prod.id, b.id);
                         const isEdited = pendingEdits[key] !== undefined;
@@ -883,7 +896,7 @@ export default function StockAssignmentPageClient() {
                   Assign Quantities per Branch:
                 </label>
                 <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-                  {branches.map((b) => (
+                  {availableBranches.map((b) => (
                     <div
                       key={b.id}
                       className="p-3 bg-slate-50 rounded-[6px] border border-slate-200 flex items-center justify-between gap-3"
@@ -906,7 +919,7 @@ export default function StockAssignmentPageClient() {
                               [b.id]: e.target.value === "" ? "" : Number(e.target.value),
                             }))
                           }
-                          className="w-24 h-[34px] px-3 bg-white border border-slate-300 rounded-[5px] text-xs font-bold font-mono text-center text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-24 h-[34px] px-2 text-center font-mono font-bold text-xs bg-white border border-slate-300 rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <span className="text-slate-500 text-[11px]">units</span>
                       </div>

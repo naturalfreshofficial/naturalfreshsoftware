@@ -34,21 +34,41 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import CustomSelect from "@/components/CustomSelect";
 import CustomDatePicker from "@/components/CustomDatePicker";
 
 export default function ExpensesPageClient() {
   const toast = useToast();
+  const { user } = useAuth();
 
   // Firestore Data
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(true);
 
+  // Available branches strictly filtered for staff
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+
+  // Auto select first assigned branch for staff
+  useEffect(() => {
+    if (user?.role === "staff" && availableBranches.length > 0) {
+      if (selectedBranchFilter === "all" || !availableBranches.some((b) => b.id === selectedBranchFilter)) {
+        setSelectedBranchFilter(availableBranches[0].id);
+      }
+    }
+  }, [user, availableBranches, selectedBranchFilter]);
+
 
   // Date Range Filters (Default to 'all_time')
   const [datePreset, setDatePreset] = useState<string>("all_time");
@@ -440,8 +460,10 @@ export default function ExpensesPageClient() {
               value={selectedBranchFilter}
               onChange={(val) => setSelectedBranchFilter(val)}
               options={[
-                { value: "all", label: "All Branches" },
-                ...branches.map((b) => ({ value: b.id, label: b.name })),
+                ...(user?.role === "super_admin"
+                  ? [{ value: "all", label: "All Branches" }]
+                  : []),
+                ...availableBranches.map((b) => ({ value: b.id, label: b.name })),
               ]}
               searchable={true}
               className="w-40"
@@ -659,7 +681,7 @@ export default function ExpensesPageClient() {
                   <CustomSelect
                     value={branchId}
                     onChange={(val) => setBranchId(val)}
-                    options={branches.map((b) => ({
+                    options={availableBranches.map((b) => ({
                       value: b.id,
                       label: b.name,
                     }))}

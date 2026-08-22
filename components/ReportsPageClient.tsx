@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
+import { useAuth } from "@/lib/AuthContext";
 import CustomSelect from "@/components/CustomSelect";
 import CustomDatePicker from "@/components/CustomDatePicker";
 
@@ -51,12 +52,32 @@ const ITEMS_PER_PAGE = 45;
 
 export default function ReportsPageClient() {
   const toast = useToast();
+  const { user } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Available branches strictly filtered for staff
+  const availableBranches = useMemo(() => {
+    if (!user || user.role === "super_admin") {
+      return branches;
+    }
+    return branches.filter((b) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
+
+  // Auto select first assigned branch for staff
+  useEffect(() => {
+    if (user?.role === "staff" && availableBranches.length > 0) {
+      if (selectedBranchFilter === "all" || !availableBranches.some((b) => b.id === selectedBranchFilter)) {
+        setSelectedBranchFilter(availableBranches[0].id);
+      }
+    }
+  }, [user, availableBranches, selectedBranchFilter]);
+
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -436,8 +457,10 @@ export default function ReportsPageClient() {
                 value={selectedBranchFilter}
                 onChange={(val) => setSelectedBranchFilter(val)}
                 options={[
-                  { value: "all", label: "All Branches" },
-                  ...branches.map((b) => ({
+                  ...(user?.role === "super_admin"
+                    ? [{ value: "all", label: "All Branches" }]
+                    : []),
+                  ...availableBranches.map((b) => ({
                     value: b.id,
                     label: `📍 ${b.name}`,
                   })),
@@ -446,6 +469,7 @@ export default function ReportsPageClient() {
                 align="right"
                 className="w-48"
               />
+
             </div>
 
             {/* Payment Filter */}

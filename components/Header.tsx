@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Search,
   Bell,
@@ -29,24 +29,26 @@ export default function Header() {
         list.push({ id: d.id, ...d.data() } as Branch);
       });
       setBranches(list);
-
-      // If no branch selected yet, auto-select first available
-      if (!selectedBranchId && list.length > 0) {
-        if (user?.role === "staff" && user.branchIds && user.branchIds.length > 0) {
-          setSelectedBranchId(user.branchIds[0]);
-        } else {
-          setSelectedBranchId(list[0].id);
-        }
-      }
     });
     return () => unsub();
-  }, [selectedBranchId, setSelectedBranchId, user]);
+  }, []);
 
   // Filter branches available to this user
-  const availableBranches = branches.filter((b) => {
-    if (user?.role === "super_admin") return true;
-    return user?.branchIds?.includes(b.id);
-  });
+  const availableBranches: Branch[] = useMemo(() => {
+    if (!user || user.role === "super_admin") return branches;
+    return branches.filter((b: Branch) => user.branchIds?.includes(b.id));
+  }, [branches, user]);
+
+  // Keep selectedBranchId valid within availableBranches
+  useEffect(() => {
+    if (availableBranches.length > 0) {
+      if (!selectedBranchId || !availableBranches.some((b: Branch) => b.id === selectedBranchId)) {
+        setSelectedBranchId(availableBranches[0].id);
+      }
+    }
+  }, [availableBranches, selectedBranchId, setSelectedBranchId]);
+
+
 
   const activeBranchName =
     branches.find((b) => b.id === selectedBranchId)?.name ||
@@ -101,11 +103,12 @@ export default function Header() {
                 onChange={(e) => setSelectedBranchId(e.target.value)}
                 className="bg-transparent border-none text-xs font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
               >
-                {availableBranches.map((b) => (
+                {availableBranches.map((b: Branch) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
                   </option>
                 ))}
+
               </select>
             </div>
           </div>
