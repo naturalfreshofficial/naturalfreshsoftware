@@ -21,6 +21,7 @@ import { Customer, Invoice, InvoiceItem, ProductVariant, Branch } from "@/lib/ty
 import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
 import { usePrinter } from "@/lib/PrinterContext";
+import { getItemKgWeight, formatKgStock, getApproximateScoops } from "@/lib/stockUtils";
 import {
   Search,
   LayoutGrid,
@@ -364,22 +365,24 @@ export default function POSBillingView() {
       return;
     }
 
-    const availableStock = getProductStockForSelectedBranch(product.id, product.stock);
+    const availableStockKg = getProductStockForSelectedBranch(product.id, product.stock);
     const cartItemId = variant ? `${product.id}_${variant.name}` : product.id;
     const existing = cart.find((item) => item.cartItemId === cartItemId);
     
-    // Total quantity of this product currently in cart across all variants
-    const currentTotalProductQtyInCart = cart
+    // Calculate total KG of this product currently in cart across all variants
+    const currentTotalProductKgInCart = cart
       .filter((item) => item.product.id === product.id)
-      .reduce((sum, item) => sum + item.quantity, 0);
+      .reduce((sum, item) => sum + getItemKgWeight(item.variant?.name, item.variant?.weightInKg) * item.quantity, 0);
 
-    if (availableStock <= 0) {
+    const requiredItemKg = getItemKgWeight(variant?.name, variant?.weightInKg);
+
+    if (availableStockKg <= 0) {
       toast.warning(`"${product.name}" is OUT OF STOCK at ${selectedBranch?.name || "this branch"}.`);
       return;
     }
 
-    if (currentTotalProductQtyInCart + 1 > availableStock) {
-      toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
+    if (currentTotalProductKgInCart + requiredItemKg > availableStockKg) {
+      toast.warning(`Cannot add more. Only ${formatKgStock(availableStockKg)} available at ${selectedBranch?.name || "this branch"}.`);
       return;
     }
 
@@ -401,13 +404,15 @@ export default function POSBillingView() {
     if (!itemInCart) return;
 
     if (delta > 0) {
-      const availableStock = getProductStockForSelectedBranch(itemInCart.product.id, itemInCart.product.stock);
-      const totalProductQty = cart
+      const availableStockKg = getProductStockForSelectedBranch(itemInCart.product.id, itemInCart.product.stock);
+      const totalProductKg = cart
         .filter((item) => item.product.id === itemInCart.product.id)
-        .reduce((sum, item) => sum + item.quantity, 0);
+        .reduce((sum, item) => sum + getItemKgWeight(item.variant?.name, item.variant?.weightInKg) * item.quantity, 0);
 
-      if (totalProductQty + delta > availableStock) {
-        toast.warning(`Cannot add more. Only ${availableStock} units available at ${selectedBranch?.name || "this branch"}.`);
+      const requiredDeltaKg = getItemKgWeight(itemInCart.variant?.name, itemInCart.variant?.weightInKg) * delta;
+
+      if (totalProductKg + requiredDeltaKg > availableStockKg) {
+        toast.warning(`Cannot add more. Only ${formatKgStock(availableStockKg)} available at ${selectedBranch?.name || "this branch"}.`);
         return;
       }
     }
@@ -740,14 +745,18 @@ export default function POSBillingView() {
         }
       }
 
-      // 3. Atomically decrement stock in Firestore branch_stocks and products
+      // 3. Atomically decrement stock in Firestore branch_stocks and products (in KGs)
+      // Core rule: 12 single scoops = 1 KG => 1 single scoop = 1/12 KG = ~0.0833 KG
       try {
         const batch = writeBatch(db);
         cart.forEach((item) => {
           if (item.product.id) {
+            const itemKg = getItemKgWeight(item.variant?.name, item.variant?.weightInKg);
+            const totalKgDeduction = Number((itemKg * item.quantity).toFixed(4));
+
             const prodRef = doc(db, "products", item.product.id);
             batch.update(prodRef, {
-              stock: increment(-item.quantity),
+              stock: increment(-totalKgDeduction),
             });
 
             if (selectedBranch?.id) {
@@ -759,7 +768,7 @@ export default function POSBillingView() {
                   productName: item.product.name,
                   branchId: selectedBranch.id,
                   branchName: selectedBranch.name,
-                  quantity: increment(-item.quantity),
+                  quantity: increment(-totalKgDeduction),
                   updatedAt: serverTimestamp(),
                 },
                 { merge: true }
@@ -1020,7 +1029,7 @@ export default function POSBillingView() {
                             : "text-slate-700 font-semibold"
                         }
                       >
-                        {isOutOfStock ? "Out of Stock" : `Stock: ${branchStock} units`}
+                        {isOutOfStock ? "Out of Stock" : `Stock: ${formatKgStock(branchStock)}`}
                       </span>
                     </div>
                   </div>
@@ -1084,7 +1093,7 @@ export default function POSBillingView() {
                                 : "text-slate-600 font-semibold"
                             }
                           >
-                            {isOutOfStock ? "Out of Stock" : `Stock: ${branchStock} units`}
+                            {isOutOfStock ? "Out of Stock" : `Stock: ${formatKgStock(branchStock)}`}
                           </span>
                         </div>
                       </div>
@@ -1632,8 +1641,11 @@ export default function POSBillingView() {
                         <Tag className="w-3.5 h-3.5" />
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-xs font-bold text-slate-900">{v.name}</p>
+                          <span className="text-[10px] text-purple-700 font-semibold font-mono bg-purple-100/70 px-1.5 py-0.2 rounded">
+                            {formatKgStock(getItemKgWeight(v.name, v.weightInKg))}
+                          </span>
                           {isSelected && (
                             <span className="px-1.5 py-0.2 bg-purple-600 text-white text-[9px] font-bold rounded-full">
                               In Cart: {inCartQty}

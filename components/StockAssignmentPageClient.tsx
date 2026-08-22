@@ -204,10 +204,10 @@ export default function StockAssignmentPageClient() {
     });
   };
 
-  // Handle inline cell change
+  // Handle inline cell change (Supports KGs with decimals e.g. 5.5 KG)
   const handleCellChange = (productId: string, branchId: string, val: string) => {
     const key = `${productId}_${branchId}`;
-    const num = val === "" ? 0 : Math.max(0, parseInt(val, 10) || 0);
+    const num = val === "" ? 0 : Math.max(0, parseFloat(val) || 0);
     setPendingEdits((prev) => ({
       ...prev,
       [key]: num,
@@ -614,14 +614,14 @@ export default function StockAssignmentPageClient() {
                           {b.name}
                         </span>
                         <span className="text-[10px] text-blue-600 font-normal font-mono">
-                          (Qty in Units)
+                          (Qty in KG)
                         </span>
                       </div>
                     </th>
                   ))}
 
                   <th className="py-3.5 px-4 text-center min-w-[120px] bg-slate-100/70 font-bold text-slate-900">
-                    Total Stock
+                    Total Stock (KG)
                   </th>
                   <th className="py-3.5 px-4 text-center min-w-[140px]">Actions</th>
                 </tr>
@@ -678,7 +678,7 @@ export default function StockAssignmentPageClient() {
                               </span>
                               <span className="text-slate-300">•</span>
                               <span className="font-bold text-blue-700 font-mono">
-                                Buffer: {prod.bufferStock} units
+                                Buffer: {prod.bufferStock} KG
                               </span>
                               <span className="text-slate-300">•</span>
                               <span className="font-mono text-slate-800 font-semibold">
@@ -704,8 +704,9 @@ export default function StockAssignmentPageClient() {
                               <input
                                 type="number"
                                 min="0"
+                                step="any"
                                 value={currentVal === 0 && !isEdited ? "" : currentVal}
-                                placeholder="0"
+                                placeholder="0.0"
                                 onWheel={(e) => (e.target as HTMLElement).blur()}
                                 onChange={(e) => handleCellChange(prod.id, b.id, e.target.value)}
                                 className={`w-20 h-[34px] px-2 text-center text-xs font-bold font-mono rounded-[5px] border transition-all ${
@@ -730,7 +731,7 @@ export default function StockAssignmentPageClient() {
                               : "bg-blue-50 text-blue-700 border-blue-100"
                           }`}
                         >
-                          {totalAssigned} units
+                          {Number(totalAssigned).toFixed(3)} KG
                         </span>
                       </td>
 

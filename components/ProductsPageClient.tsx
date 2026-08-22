@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { getItemKgWeight, formatKgStock } from "@/lib/stockUtils";
 import {
   Package,
   FolderTree,
@@ -125,6 +126,7 @@ interface FormVariantRow {
   name: string;
   price: number | "";
   barcode: string;
+  weightInKg?: number | "";
   enabled: boolean;
 }
 
@@ -444,6 +446,7 @@ export default function ProductsPageClient() {
           name: v.name,
           price: saved ? saved.price : "",
           barcode: saved?.barcode || "",
+          weightInKg: saved?.weightInKg !== undefined ? saved.weightInKg : getItemKgWeight(v.name),
           enabled: Boolean(saved),
         });
         savedMap.delete(v.name.toLowerCase().trim());
@@ -455,6 +458,7 @@ export default function ProductsPageClient() {
           name: v.name,
           price: v.price,
           barcode: v.barcode || "",
+          weightInKg: v.weightInKg !== undefined ? v.weightInKg : getItemKgWeight(v.name),
           enabled: true,
         });
       });
@@ -482,6 +486,7 @@ export default function ProductsPageClient() {
           name: v.name,
           price: "",
           barcode: "",
+          weightInKg: getItemKgWeight(v.name),
           enabled: false,
         }));
       setFormVariants(rows);
@@ -609,6 +614,7 @@ export default function ProductsPageClient() {
         name: v.name.trim(),
         price: Number(v.price),
         barcode: (v.barcode || "").trim(),
+        weightInKg: v.weightInKg !== undefined && Number(v.weightInKg) > 0 ? Number(v.weightInKg) : getItemKgWeight(v.name),
         status: "active" as const,
       }));
 
@@ -1703,11 +1709,16 @@ export default function ProductsPageClient() {
                                 }}
                                 className="w-4 h-4 text-purple-600 rounded-[3px] border-slate-300 focus:ring-purple-500 cursor-pointer"
                               />
-                              <span className="font-bold text-slate-900 text-xs">{variantRow.name}</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-900 text-xs">{variantRow.name}</span>
+                                <span className="px-1.5 py-0.2 rounded bg-purple-100/70 text-purple-700 font-bold text-[10px] font-mono">
+                                  {formatKgStock(getItemKgWeight(variantRow.name, typeof variantRow.weightInKg === "number" ? variantRow.weightInKg : undefined))}
+                                </span>
+                              </div>
                             </label>
 
                             {variantRow.enabled && (
-                              <div className="flex items-center gap-2 flex-1 justify-end">
+                              <div className="flex items-center gap-2 flex-1 justify-end flex-wrap">
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs font-bold text-slate-500">₹</span>
                                   <input
@@ -1715,7 +1726,7 @@ export default function ProductsPageClient() {
                                     step="0.01"
                                     min="0"
                                     required
-                                    placeholder="Variant Price"
+                                    placeholder="Price"
                                     value={variantRow.price}
                                     onChange={(e) => {
                                       const val = e.target.value === "" ? "" : Number(e.target.value);
@@ -1723,13 +1734,31 @@ export default function ProductsPageClient() {
                                         prev.map((r, i) => (i === idx ? { ...r, price: val } : r))
                                       );
                                     }}
-                                    className="w-28 h-[32px] px-2.5 bg-white border border-purple-300 rounded-[5px] text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    className="w-24 h-[32px] px-2.5 bg-white border border-purple-300 rounded-[5px] text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                  />
+                                </div>
+
+                                <div className="flex items-center gap-1" title="Portion in KG deducted per unit sold (12 single scoops = 1 KG)">
+                                  <span className="text-[10px] text-slate-400 font-bold">KG:</span>
+                                  <input
+                                    type="number"
+                                    step="0.001"
+                                    min="0.001"
+                                    placeholder="KG"
+                                    value={variantRow.weightInKg !== undefined ? variantRow.weightInKg : Number(getItemKgWeight(variantRow.name).toFixed(3))}
+                                    onChange={(e) => {
+                                      const val = e.target.value === "" ? "" : Number(e.target.value);
+                                      setFormVariants((prev) =>
+                                        prev.map((r, i) => (i === idx ? { ...r, weightInKg: val } : r))
+                                      );
+                                    }}
+                                    className="w-18 h-[32px] px-1 bg-white border border-purple-200 rounded-[5px] text-[11px] font-mono text-slate-800 text-center focus:outline-none focus:ring-1 focus:ring-purple-500"
                                   />
                                 </div>
 
                                 <input
                                   type="text"
-                                  placeholder="Variant Barcode (Opt)"
+                                  placeholder="Barcode (Opt)"
                                   value={variantRow.barcode}
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -1737,7 +1766,7 @@ export default function ProductsPageClient() {
                                       prev.map((r, i) => (i === idx ? { ...r, barcode: val } : r))
                                     );
                                   }}
-                                  className="w-36 h-[32px] px-2 bg-slate-50 border border-slate-200 rounded-[5px] text-[11px] font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 hidden md:block"
+                                  className="w-28 h-[32px] px-2 bg-slate-50 border border-slate-200 rounded-[5px] text-[11px] font-mono text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 hidden md:block"
                                 />
                               </div>
                             )}

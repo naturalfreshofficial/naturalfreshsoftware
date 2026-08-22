@@ -24,12 +24,14 @@ export interface ProductVariant {
   price: number;
   barcode?: string;
   status?: "active" | "inactive";
+  weightInKg?: number; // e.g. 1/12 = 0.0833 for single scoop, 0.5 for 500ml
 }
 
 export interface VariationItem {
   id: string;
   name: string;
   status: "active" | "inactive";
+  weightInKg?: number;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -41,8 +43,9 @@ export interface ProductItem {
   category: string;
   barcode: string;
   isFavorite: boolean;
-  stock: number;
-  bufferStock: number;
+  stock: number; // Stock in KG
+  bufferStock: number; // Buffer stock in KG
+  unit?: string; // "KG"
   status: "active" | "inactive";
   imageUrl?: string;
   hasVariations?: boolean;
@@ -61,6 +64,8 @@ export interface InvoiceItem {
   total: number;
   variantId?: string;
   variantName?: string;
+  weightInKg?: number;
+  totalWeightInKg?: number;
 }
 
 export interface Invoice {

@@ -814,13 +814,13 @@ export default function StockPageClient() {
                               : "bg-emerald-50 text-emerald-700"
                           }`}
                         >
-                          {p.effectiveStock} units
+                          {Number(p.effectiveStock).toFixed(3)} KG
                         </span>
                       </td>
 
                       {/* Buffer Threshold */}
                       <td className="py-3 px-4 text-center font-mono text-slate-600 font-bold">
-                        {p.bufferStock}
+                        {p.bufferStock} KG
                       </td>
 
                       {/* Buffer Status & Color Badge */}
