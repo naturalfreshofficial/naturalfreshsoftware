@@ -136,3 +136,32 @@ export interface BranchStock {
   updatedAt?: any;
 }
 
+export interface Staff {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  branchIds: string[]; // multi-store selection
+  branchNames?: string[];
+  allowedPages: string[]; // multi-page route access list (Dashboard strictly excluded)
+  status: "active" | "inactive";
+  role?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export type UserRole = "super_admin" | "staff";
+
+export interface AuthSession {
+  uid: string;
+  role: UserRole;
+  name: string;
+  phone?: string;
+  email?: string;
+  allowedPages?: string[]; // for staff
+  branchIds?: string[]; // for staff
+  currentBranchId?: string;
+  staffDocId?: string;
+}
+
+

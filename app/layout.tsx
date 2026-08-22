@@ -1,6 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/ToastProvider";
+import { AuthProvider } from "@/lib/AuthContext";
+import AppShell from "@/components/AppShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,13 +15,27 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-import Sidebar from "@/components/Sidebar";
-import Header from "@/components/Header";
-import { ToastProvider } from "@/components/ToastProvider";
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 export const metadata: Metadata = {
-  title: "Retailnext - Retail Management Solutions",
-  description: "Modern POS and Retail Management System",
+  title: "Natural Fresh - Retail & POS Solutions",
+  description: "Modern POS and Multi-Store Retail Management System",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Natural Fresh POS",
+  },
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
@@ -32,14 +49,19 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#2563eb" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+      </head>
       <body className="h-full bg-slate-50 flex text-slate-800 antialiased font-sans" suppressHydrationWarning>
-        <ToastProvider>
-          <Sidebar />
-          <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-            <Header />
-            <main className="flex-1 overflow-y-auto">{children}</main>
-          </div>
-        </ToastProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <AppShell>{children}</AppShell>
+          </ToastProvider>
+        </AuthProvider>
       </body>
     </html>
   );
