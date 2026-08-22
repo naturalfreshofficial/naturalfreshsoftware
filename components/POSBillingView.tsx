@@ -20,6 +20,7 @@ import { db } from "@/lib/firebase";
 import { Customer, Invoice, InvoiceItem } from "@/lib/types";
 import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
+import { usePrinter } from "@/lib/PrinterContext";
 import {
   Search,
 
@@ -75,6 +76,7 @@ export interface POSCartItem {
 export default function POSBillingView() {
   const toast = useToast();
   const { user, selectedBranchId: authBranchId, setSelectedBranchId: setAuthBranchId } = useAuth();
+  const printer = usePrinter();
   
   // Branches state from Firestore
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -734,19 +736,31 @@ export default function POSBillingView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <span className="text-xs text-slate-300 whitespace-nowrap font-medium">Switch Branch:</span>
-            <select
-              value={selectedBranchId}
-              onChange={(e) => handleBranchChange(e.target.value)}
-              className="h-[34px] px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-56"
-            >
-              {availableBranches.map((b) => (
-                <option key={b.id} value={b.id} className="bg-slate-900 text-white">
-                  📍 {b.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap justify-end">
+            {/* Quick Thermal Printer Status */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[5px] bg-slate-800 border border-slate-700 text-[11px]">
+              <Printer className={`w-3.5 h-3.5 ${printer.isConnected ? "text-emerald-400" : "text-slate-400"}`} />
+              <span className="text-slate-300 font-medium">
+                {printer.isConnected
+                  ? `${printer.connectionType?.toUpperCase()}: ${printer.deviceName || "Thermal Ready"}`
+                  : "Thermal: Offline"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-300 whitespace-nowrap font-medium">Switch Branch:</span>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => handleBranchChange(e.target.value)}
+                className="h-[34px] px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-[5px] text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-52"
+              >
+                {availableBranches.map((b) => (
+                  <option key={b.id} value={b.id} className="bg-slate-900 text-white">
+                    📍 {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
         </div>
@@ -1691,23 +1705,58 @@ export default function POSBillingView() {
             </div>
 
             {/* Actions */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setIsReceiptModalOpen(false)}
-                className="h-[36px] px-4 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+                className="w-full sm:w-auto h-[36px] px-4 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                {/* Standard System Print */}
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="h-[36px] px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  className="h-[36px] px-3.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-[6px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Receipt</span>
+                  <FileText className="w-3.5 h-3.5 text-slate-500" />
+                  <span>System Print</span>
                 </button>
+
+                {/* Direct ESC/POS Thermal Print */}
+                {printer.isConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => printer.printInvoice(completedInvoice, selectedBranch?.name)}
+                    disabled={printer.isPrinting}
+                    className="h-[36px] px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    {printer.isPrinting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Printer className="w-3.5 h-3.5" />
+                    )}
+                    <span>Thermal Print ({printer.connectionType?.toUpperCase()})</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (printer.isWebUsbSupported) {
+                        await printer.connectUSB();
+                      } else if (printer.isWebBluetoothSupported) {
+                        await printer.connectBluetooth();
+                      } else {
+                        toast.info("Please open Settings to configure your thermal printer.");
+                      }
+                    }}
+                    className="h-[36px] px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Connect Thermal</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

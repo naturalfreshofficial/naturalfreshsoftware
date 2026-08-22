@@ -8,11 +8,7 @@ export default function PWAUpdater() {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
 
   useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      !("serviceWorker" in navigator) ||
-      process.env.NODE_ENV !== "production" && !window.location.hostname.includes("localhost")
-    ) {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
       return;
     }
 
@@ -20,6 +16,7 @@ export default function PWAUpdater() {
     navigator.serviceWorker
       .register("/sw.js")
       .then((registration) => {
+
         // Periodically check for SW updates every 15 minutes
         setInterval(() => {
           registration.update().catch(() => {});

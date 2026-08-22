@@ -36,6 +36,8 @@ import {
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
 import { useAuth } from "@/lib/AuthContext";
+import { usePrinter } from "@/lib/PrinterContext";
+
 import CustomSelect from "@/components/CustomSelect";
 import CustomDatePicker from "@/components/CustomDatePicker";
 
@@ -53,6 +55,7 @@ const ITEMS_PER_PAGE = 45;
 export default function ReportsPageClient() {
   const toast = useToast();
   const { user } = useAuth();
+  const printer = usePrinter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -828,22 +831,57 @@ export default function ReportsPageClient() {
             </div>
 
             {/* Actions */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setInspectInvoice(null)}
-                className="h-[36px] px-4 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+                className="w-full sm:w-auto h-[36px] px-4 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="h-[36px] px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Receipt</span>
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="h-[36px] px-3.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-[6px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-500" />
+                  <span>System Print</span>
+                </button>
+
+                {printer.isConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => printer.printInvoice(inspectInvoice)}
+                    disabled={printer.isPrinting}
+                    className="h-[36px] px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    {printer.isPrinting ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Printer className="w-3.5 h-3.5" />
+                    )}
+                    <span>Thermal Print ({printer.connectionType?.toUpperCase()})</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (printer.isWebUsbSupported) {
+                        await printer.connectUSB();
+                      } else if (printer.isWebBluetoothSupported) {
+                        await printer.connectBluetooth();
+                      } else {
+                        toast.info("Please open Settings to configure your thermal printer.");
+                      }
+                    }}
+                    className="h-[36px] px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Connect Thermal</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

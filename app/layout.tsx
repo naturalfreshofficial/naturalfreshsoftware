@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ToastProvider";
 import { AuthProvider } from "@/lib/AuthContext";
+import { PrinterProvider } from "@/lib/PrinterContext";
 import AppShell from "@/components/AppShell";
 
 const geistSans = Geist({
@@ -33,8 +34,13 @@ export const metadata: Metadata = {
     title: "Natural Fresh POS",
   },
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/app-icon.jpeg" },
+    ],
+    shortcut: "/icon-192.png",
+    apple: "/icon-192.png",
   },
 };
 
@@ -50,19 +56,38 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
+        <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
         <meta name="theme-color" content="#2563eb" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__pwaDeferredPrompt = null;
+              window.addEventListener('beforeinstallprompt', function(e) {
+                e.preventDefault();
+                window.__pwaDeferredPrompt = e;
+                window.dispatchEvent(new CustomEvent('pwa-deferred-ready'));
+              });
+            `,
+          }}
+        />
       </head>
+
+
       <body className="h-full bg-slate-50 flex text-slate-800 antialiased font-sans" suppressHydrationWarning>
         <AuthProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <PrinterProvider>
+              <AppShell>{children}</AppShell>
+            </PrinterProvider>
           </ToastProvider>
         </AuthProvider>
       </body>
     </html>
   );
 }
+

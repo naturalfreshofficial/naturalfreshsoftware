@@ -19,7 +19,9 @@ import {
   EyeOff,
   Store,
   Sparkles,
+  X,
 } from "lucide-react";
+
 
 export default function LoginPage() {
   const { user, loginSuperAdmin, sendStaffOtp, verifyStaffOtp } = useAuth();
@@ -44,35 +46,54 @@ export default function LoginPage() {
 
   // PWA Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
 
-  // Listen for PWA beforeinstallprompt
+  // Listen for PWA beforeinstallprompt globally
   useEffect(() => {
-    const handleBeforeInstall = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setIsInstallable(true);
-    };
+    // Check if early prompt was already captured by layout script
+    if (typeof window !== "undefined") {
+      if ((window as any).__pwaDeferredPrompt) {
+        setDeferredPrompt((window as any).__pwaDeferredPrompt);
+      }
 
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setIsInstallable(false);
-      toast.success("Natural Fresh App installed successfully!");
-    };
+      const handleBeforeInstall = (e: any) => {
+        e.preventDefault();
+        (window as any).__pwaDeferredPrompt = e;
+        setDeferredPrompt(e);
+      };
 
-    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
-    window.addEventListener("appinstalled", handleAppInstalled);
+      const handleDeferredReady = () => {
+        if ((window as any).__pwaDeferredPrompt) {
+          setDeferredPrompt((window as any).__pwaDeferredPrompt);
+        }
+      };
 
-    // Check if already in standalone mode
-    if (window.matchMedia("(display-mode: standalone)").matches) {
-      setIsInstalled(true);
+      const handleAppInstalled = () => {
+        setIsInstalled(true);
+        (window as any).__pwaDeferredPrompt = null;
+        setDeferredPrompt(null);
+        toast.success("Natural Fresh App installed successfully!");
+      };
+
+      window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+      window.addEventListener("pwa-deferred-ready", handleDeferredReady);
+      window.addEventListener("appinstalled", handleAppInstalled);
+
+      // Check if already in standalone mode
+      if (
+        window.matchMedia("(display-mode: standalone)").matches ||
+        (window.navigator as any).standalone === true
+      ) {
+        setIsInstalled(true);
+      }
+
+      return () => {
+        window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+        window.removeEventListener("pwa-deferred-ready", handleDeferredReady);
+        window.removeEventListener("appinstalled", handleAppInstalled);
+      };
     }
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
   }, [toast]);
 
   // Resend Timer Countdown
@@ -149,19 +170,26 @@ export default function LoginPage() {
 
   // Handle PWA Install Button Click
   const handleInstallApp = async () => {
-    if (!deferredPrompt) {
-      toast.info("To install on iOS or Android, open your browser menu and tap 'Add to Home Screen'.");
-      return;
-    }
+    const promptObj = (window as any).__pwaDeferredPrompt || deferredPrompt;
 
-    deferredPrompt.prompt();
-    const choiceResult = await deferredPrompt.userChoice;
-    if (choiceResult.outcome === "accepted") {
-      setIsInstalled(true);
-      setIsInstallable(false);
-      toast.success("Installing Natural Fresh App...");
+    if (promptObj) {
+      try {
+        promptObj.prompt();
+        const choiceResult = await promptObj.userChoice;
+        if (choiceResult.outcome === "accepted") {
+          setIsInstalled(true);
+          toast.success("Natural Fresh App installed successfully!");
+        }
+        (window as any).__pwaDeferredPrompt = null;
+        setDeferredPrompt(null);
+      } catch (e) {
+        console.warn("Prompt error:", e);
+        setIsInstallGuideOpen(true);
+      }
+    } else {
+      // Show device-specific install guide modal
+      setIsInstallGuideOpen(true);
     }
-    setDeferredPrompt(null);
   };
 
   return (
@@ -463,6 +491,92 @@ export default function LoginPage() {
           </span>
         </div>
       </footer>
+
+      {/* PWA Install Guide Modal for Windows, Android, iOS */}
+      {isInstallGuideOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-[12px] border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-[6px] bg-blue-600 p-0.5 flex items-center justify-center">
+                  <img src="/app-icon.jpeg" alt="Icon" className="w-full h-full object-cover rounded-[4px]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Install Natural Fresh App</h3>
+                  <p className="text-[10px] text-slate-300">Fast 1-tap launcher for your device</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsInstallGuideOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-700">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-[8px] flex items-center gap-3">
+                <div className="w-12 h-12 rounded-[8px] bg-white p-1 shadow-xs shrink-0 flex items-center justify-center overflow-hidden border border-blue-200">
+                  <img src="/app-icon.jpeg" alt="Icon" className="w-full h-full object-cover rounded-[6px]" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900 text-xs">Natural Fresh POS</p>
+                  <p className="text-[11px] text-slate-500">Standalone App • Offline Enabled</p>
+                </div>
+              </div>
+
+              {/* Windows & Desktop Guide */}
+              <div className="space-y-2">
+                <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px]">1</span>
+                  <span>On Windows / PC (Chrome / Edge):</span>
+                </p>
+                <div className="p-2.5 bg-slate-50 rounded-[6px] border border-slate-200 text-[11px] space-y-1 text-slate-600">
+                  <p>• Look at your browser address bar on the top-right.</p>
+                  <p>• Click the <strong>Install App icon (💻 or ⊕)</strong>.</p>
+                  <p>• Or click the 3 dots <strong>(⋮) ➔ &quot;Install Natural Fresh&quot;</strong>.</p>
+                </div>
+              </div>
+
+              {/* Android Guide */}
+              <div className="space-y-2">
+                <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px]">2</span>
+                  <span>On Android Phone or Tablet:</span>
+                </p>
+                <div className="p-2.5 bg-slate-50 rounded-[6px] border border-slate-200 text-[11px] space-y-1 text-slate-600">
+                  <p>• Tap the 3 dots <strong>(⋮)</strong> in Chrome at the top right.</p>
+                  <p>• Select <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home screen&quot;</strong>.</p>
+                </div>
+              </div>
+
+              {/* iOS Guide */}
+              <div className="space-y-2">
+                <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px]">3</span>
+                  <span>On iPhone / iPad (Safari):</span>
+                </p>
+                <div className="p-2.5 bg-slate-50 rounded-[6px] border border-slate-200 text-[11px] space-y-1 text-slate-600">
+                  <p>• Tap the <strong>Share button (⎋)</strong> at the bottom of Safari.</p>
+                  <p>• Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong>.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsInstallGuideOpen(false)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] text-xs font-bold transition-colors cursor-pointer"
+              >
+                Got It, Thanks!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

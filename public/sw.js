@@ -1,13 +1,18 @@
-// Service Worker for Natural Fresh Retail PWA
-const CACHE_NAME = "naturalfresh-v1.0.0";
+const CACHE_NAME = "naturalfresh-v1.0.2";
 const STATIC_ASSETS = [
   "/",
   "/login",
   "/pos-billing",
   "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/app-icon.png",
+  "/app-icon.jpeg",
   "/logo.png",
   "/favicon.ico"
 ];
+
+
 
 // Install Event
 self.addEventListener("install", (event) => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import {
   Search,
   Bell,
@@ -10,8 +11,16 @@ import {
   Store,
   ShieldCheck,
   User,
+  Printer,
+  Usb,
+  Bluetooth,
+  CheckCircle2,
+  RefreshCw,
+  Settings as SettingsIcon,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
+import { usePrinter } from "@/lib/PrinterContext";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Branch } from "@/lib/types";
@@ -22,8 +31,33 @@ interface HeaderProps {
 
 export default function Header({ onOpenMobileMenu }: HeaderProps) {
   const { user, logout, selectedBranchId, setSelectedBranchId } = useAuth();
+  const printer = usePrinter();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isPrinterOpen, setIsPrinterOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const printerMenuRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        printerMenuRef.current &&
+        !printerMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsPrinterOpen(false);
+      }
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
 
   // Fetch branches
   useEffect(() => {
@@ -130,6 +164,143 @@ export default function Header({ onOpenMobileMenu }: HeaderProps) {
           </div>
         )}
 
+        {/* Thermal Printer Quick Connect & Status Button */}
+        <div className="relative" ref={printerMenuRef}>
+          <button
+            type="button"
+            onClick={() => setIsPrinterOpen(!isPrinterOpen)}
+            title={printer.isConnected ? `Connected: ${printer.deviceName}` : "Connect Thermal Printer"}
+            className={`h-[36px] px-2.5 flex items-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+              printer.isConnected
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900"
+            }`}
+          >
+            <Printer className={`w-4 h-4 ${printer.isConnected ? "text-emerald-600" : "text-slate-500"}`} />
+            <span className="hidden sm:inline">
+              {printer.isConnected
+                ? `${printer.connectionType?.toUpperCase()}: Ready`
+                : "Connect Printer"}
+            </span>
+            {printer.isConnected && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            )}
+          </button>
+
+          {/* Quick Printer Dropdown Popover */}
+          {isPrinterOpen && (
+            <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white rounded-[8px] border border-slate-200 shadow-xl z-50 p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-100 text-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <Printer className="w-4 h-4 text-blue-600" />
+                  <span className="font-bold text-slate-900">Thermal Printer</span>
+                </div>
+                <span className="text-[10px] font-mono font-semibold text-slate-400">
+                  {printer.settings.paperWidth}mm Roll
+                </span>
+              </div>
+
+              {/* Status Section */}
+              {printer.isConnected ? (
+                <div className="p-2.5 bg-emerald-50 rounded-[6px] border border-emerald-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-emerald-800 font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Connected ({printer.connectionType?.toUpperCase()})
+                    </span>
+                    <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded font-bold uppercase">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-900 truncate font-medium">
+                    {printer.deviceName || "POS Thermal Printer"}
+                  </p>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        printer.printTestReceipt();
+                      }}
+                      disabled={printer.isPrinting}
+                      className="flex-1 h-[30px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-[4px] text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {printer.isPrinting ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Printer className="w-3 h-3" />
+                      )}
+                      <span>Test Print</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => printer.disconnect()}
+                      className="h-[30px] px-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-[4px] text-[11px] font-bold transition-colors cursor-pointer"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-slate-500 text-[11px]">
+                    Connect your POS thermal receipt printer driverless via USB or Bluetooth:
+                  </p>
+
+                  <div className="space-y-1.5">
+                    {/* Connect USB */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await printer.connectUSB();
+                        setIsPrinterOpen(false);
+                      }}
+                      disabled={printer.isConnecting || !printer.isWebUsbSupported}
+                      className="w-full h-[34px] px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-[6px] font-bold flex items-center justify-between transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Usb className="w-3.5 h-3.5" />
+                        <span>Connect USB Printer</span>
+                      </div>
+                      <span className="text-[10px] opacity-80">Cable</span>
+                    </button>
+
+                    {/* Connect Bluetooth */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await printer.connectBluetooth();
+                        setIsPrinterOpen(false);
+                      }}
+                      disabled={printer.isConnecting || !printer.isWebBluetoothSupported}
+                      className="w-full h-[34px] px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[6px] font-bold flex items-center justify-between transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Bluetooth className="w-3.5 h-3.5" />
+                        <span>Connect Bluetooth</span>
+                      </div>
+                      <span className="text-[10px] opacity-80">Wireless</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Settings Link */}
+              <div className="pt-1 border-t border-slate-100 flex items-center justify-between">
+                <Link
+                  href="/settings"
+                  onClick={() => setIsPrinterOpen(false)}
+                  className="text-blue-600 hover:underline flex items-center gap-1 font-semibold text-[11px]"
+                >
+                  <SettingsIcon className="w-3 h-3" />
+                  <span>Printer & Roll Settings</span>
+                </Link>
+                <span className="text-[10px] text-slate-400">ESC/POS Ready</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Notifications */}
         <button
           type="button"
@@ -141,7 +312,8 @@ export default function Header({ onOpenMobileMenu }: HeaderProps) {
         </button>
 
         {/* User Profile & Menu */}
-        <div className="relative">
+        <div className="relative" ref={profileMenuRef}>
+
           <button
             type="button"
             onClick={() => setIsProfileOpen(!isProfileOpen)}

@@ -252,20 +252,41 @@ export default function MobileMenuDrawer({
         </div>
 
         {/* Footer Actions in Drawer */}
-        <div className="p-4 bg-white border-t border-slate-200/80 flex items-center justify-between gap-2 shrink-0">
+        <div className="p-4 bg-white border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={async () => {
+              const promptObj = (window as any).__pwaDeferredPrompt;
+              if (promptObj) {
+                try {
+                  promptObj.prompt();
+                  await promptObj.userChoice;
+                  (window as any).__pwaDeferredPrompt = null;
+                } catch (e) {}
+              } else {
+                alert("To install Natural Fresh on your device:\n\n• Android: Tap the 3 dots (⋮) in Chrome -> 'Install app'\n• iPhone/iPad: Tap Share (⎋) in Safari -> 'Add to Home Screen'\n• Windows: Click the Install icon in the browser address bar");
+              }
+            }}
+            className="w-full sm:flex-1 h-[40px] px-4 rounded-[8px] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Install App on Device</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
               onClose();
               logout();
             }}
-            className="flex-1 h-[40px] px-4 rounded-[8px] bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            className="w-full sm:w-auto h-[40px] px-4 rounded-[8px] bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
-            <span>Sign Out Session</span>
+            <span>Sign Out</span>
           </button>
         </div>
       </div>
     </div>
   );
 }
+
