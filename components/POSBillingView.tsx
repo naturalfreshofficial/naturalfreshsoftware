@@ -56,6 +56,7 @@ import {
   ShoppingBag,
   Layers,
   Tag,
+  Sparkles,
 } from "lucide-react";
 
 export interface POSProduct {
@@ -74,10 +75,11 @@ export interface POSProduct {
 }
 
 export interface POSCartItem {
-  cartItemId: string; // `${product.id}_${variant?.name || 'base'}`
+  cartItemId: string; // `${product.id}_${variant?.name || 'base'}_${mixKey}`
   product: POSProduct;
   variant?: ProductVariant;
   quantity: number;
+  mixItems?: string[];
 }
 
 export default function POSBillingView() {
@@ -121,6 +123,20 @@ export default function POSBillingView() {
   const [selectedProductForVariants, setSelectedProductForVariants] = useState<POSProduct | null>(null);
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
 
+  // Mix Category Item Selection Modal State
+  const [selectedProductForMix, setSelectedProductForMix] = useState<POSProduct | null>(null);
+  const [selectedMixVariant, setSelectedMixVariant] = useState<ProductVariant | undefined>(undefined);
+  const [selectedMixItemNames, setSelectedMixItemNames] = useState<string[]>([]);
+  const [mixSearchQuery, setMixSearchQuery] = useState("");
+  const [isMixModalOpen, setIsMixModalOpen] = useState(false);
+  const [editingMixCartItemId, setEditingMixCartItemId] = useState<string | null>(null);
+
+  // Helper to detect Mix Category product
+  const isMixProduct = (category: string) => {
+    const cat = (category || "").trim().toLowerCase();
+    return cat === "mix" || cat === "mixes" || cat === "mixed" || cat.includes("mix");
+  };
+
   // Customers dynamic state from Firestore
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -144,7 +160,10 @@ export default function POSBillingView() {
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [note, setNote] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"UPI" | "Cash" | "Card">("UPI");
+  const [paymentMethod, setPaymentMethod] = useState<"UPI" | "Cash" | "Card" | "Split">("UPI");
+  const [splitCash, setSplitCash] = useState<number | "">("");
+  const [splitUpi, setSplitUpi] = useState<number | "">("");
+  const [splitCard, setSplitCard] = useState<number | "">("");
 
   // Drafts & Completed Invoices
   const [draftBills, setDraftBills] = useState<Invoice[]>([]);
@@ -358,16 +377,28 @@ export default function POSBillingView() {
   }, [cart]);
 
   // Cart Actions with branch stock check and variation support
-  const addToCart = (product: POSProduct, variant?: ProductVariant) => {
-    // If product has variations and no specific variant is passed, open variant modal!
+  const addToCart = (product: POSProduct, variant?: ProductVariant, mixItems?: string[]) => {
+    // 1. If product has variations and no specific variant is passed, open variant modal!
     if (!variant && product.hasVariations && product.variants && product.variants.length > 0) {
       setSelectedProductForVariants(product);
       setIsVariantModalOpen(true);
       return;
     }
 
+    // 2. If product belongs to Mix category and no mix items chosen yet, open Mix Selection Modal!
+    if (isMixProduct(product.category) && (!mixItems || mixItems.length === 0)) {
+      setSelectedProductForMix(product);
+      setSelectedMixVariant(variant);
+      setSelectedMixItemNames([]);
+      setMixSearchQuery("");
+      setEditingMixCartItemId(null);
+      setIsMixModalOpen(true);
+      return;
+    }
+
     const availableStockKg = getProductStockForSelectedBranch(product.id, product.stock);
-    const cartItemId = variant ? `${product.id}_${variant.name}` : product.id;
+    const mixKey = mixItems && mixItems.length > 0 ? `_mix_${[...mixItems].sort().join(",")}` : "";
+    const cartItemId = variant ? `${product.id}_${variant.name}${mixKey}` : `${product.id}${mixKey}`;
     const existing = cart.find((item) => item.cartItemId === cartItemId);
     
     // Calculate total KG of this product currently in cart across all variants
@@ -393,11 +424,49 @@ export default function POSBillingView() {
           item.cartItemId === cartItemId ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { cartItemId, product, variant, quantity: 1 }];
+      return [...prev, { cartItemId, product, variant, quantity: 1, mixItems }];
     });
 
     const itemDisplayName = variant ? `${product.name} (${variant.name})` : product.name;
     toast.success(`Added ${itemDisplayName} to cart!`);
+  };
+
+  // Open Mix Modal to edit existing mix in cart
+  const openEditMixModal = (item: POSCartItem) => {
+    setSelectedProductForMix(item.product);
+    setSelectedMixVariant(item.variant);
+    setSelectedMixItemNames(item.mixItems || []);
+    setMixSearchQuery("");
+    setEditingMixCartItemId(item.cartItemId);
+    setIsMixModalOpen(true);
+  };
+
+  // Confirm Mix Selection from Modal
+  const handleConfirmMixSelection = () => {
+    if (!selectedProductForMix) return;
+    if (selectedMixItemNames.length === 0) {
+      toast.warning("Please select at least 1 flavour/item for this mix.");
+      return;
+    }
+
+    if (editingMixCartItemId) {
+      setCart((prev) =>
+        prev.map((it) =>
+          it.cartItemId === editingMixCartItemId
+            ? { ...it, mixItems: [...selectedMixItemNames] }
+            : it
+        )
+      );
+      toast.success("Mix items updated!");
+    } else {
+      addToCart(selectedProductForMix, selectedMixVariant, [...selectedMixItemNames]);
+    }
+
+    setIsMixModalOpen(false);
+    setSelectedProductForMix(null);
+    setSelectedMixVariant(undefined);
+    setSelectedMixItemNames([]);
+    setEditingMixCartItemId(null);
   };
 
   const updateQuantity = (cartItemId: string, delta: number) => {
@@ -440,6 +509,10 @@ export default function POSBillingView() {
     setSelectedCustomer(null);
     setDiscountPercent(0);
     setNote("");
+    setPaymentMethod("UPI");
+    setSplitCash("");
+    setSplitUpi("");
+    setSplitCard("");
     setActiveDraftId(null);
   };
 
@@ -547,10 +620,11 @@ export default function POSBillingView() {
           total: itemPrice * item.quantity,
           variantId: item.variant?.id || "",
           variantName: item.variant?.name || "",
+          ...(item.mixItems && item.mixItems.length > 0 ? { mixItems: item.mixItems } : {}),
         };
       });
 
-      const draftData: Partial<Invoice> = {
+      const draftData: any = {
         invoiceNumber: activeDraftId
           ? draftBills.find((d) => d.id === activeDraftId)?.invoiceNumber || generateInvoiceNumber()
           : generateInvoiceNumber(),
@@ -575,6 +649,15 @@ export default function POSBillingView() {
         sgstAmount,
         totalPayable,
         paymentMethod,
+        ...(paymentMethod === "Split"
+          ? {
+              splitPayments: {
+                cash: Number(splitCash || 0),
+                upi: Number(splitUpi || 0),
+                card: Number(splitCard || 0),
+              },
+            }
+          : {}),
         status: "draft",
         note: note.trim() || "",
         updatedAt: serverTimestamp(),
@@ -608,9 +691,10 @@ export default function POSBillingView() {
       const matchedVariant = existingProduct?.variants?.find(
         (v) => v.name === item.variantName || v.id === item.variantId
       );
+      const mixKey = item.mixItems && item.mixItems.length > 0 ? `_mix_${[...item.mixItems].sort().join(",")}` : "";
       const cartItemId = item.variantName
-        ? `${item.productId}_${item.variantName}`
-        : item.productId;
+        ? `${item.productId}_${item.variantName}${mixKey}`
+        : `${item.productId}${mixKey}`;
 
       return {
         cartItemId,
@@ -626,13 +710,23 @@ export default function POSBillingView() {
         },
         variant: matchedVariant || (item.variantName ? { id: item.variantId || item.variantName, name: item.variantName, price: item.price, status: "active" as const } : undefined),
         quantity: item.quantity,
+        mixItems: item.mixItems || undefined,
       };
     });
 
     setCart(restoredCart);
     setDiscountPercent(draft.discountPercent || 0);
     setNote(draft.note || "");
-    setPaymentMethod(draft.paymentMethod || "UPI");
+    setPaymentMethod((draft.paymentMethod as any) || "UPI");
+    if (draft.splitPayments) {
+      setSplitCash(draft.splitPayments.cash || "");
+      setSplitUpi(draft.splitPayments.upi || "");
+      setSplitCard(draft.splitPayments.card || "");
+    } else {
+      setSplitCash("");
+      setSplitUpi("");
+      setSplitCard("");
+    }
     setActiveDraftId(draft.id);
 
     if (draft.customer && draft.customer.name !== "Walk-in Customer") {
@@ -674,6 +768,18 @@ export default function POSBillingView() {
       return;
     }
 
+    if (paymentMethod === "Split") {
+      const totalSplit = Number(
+        (Number(splitCash || 0) + Number(splitUpi || 0) + Number(splitCard || 0)).toFixed(2)
+      );
+      if (Math.abs(totalSplit - totalPayable) > 0.5) {
+        toast.error(
+          `Split amounts total (₹${totalSplit.toFixed(2)}) must equal Total Payable (₹${totalPayable.toFixed(2)}). Remaining: ₹${(totalPayable - totalSplit).toFixed(2)}`
+        );
+        return;
+      }
+    }
+
     setIsSubmittingBill(true);
     try {
       const invoiceNumber = generateInvoiceNumber();
@@ -692,10 +798,11 @@ export default function POSBillingView() {
           total: itemPrice * item.quantity,
           variantId: item.variant?.id || "",
           variantName: item.variant?.name || "",
+          ...(item.mixItems && item.mixItems.length > 0 ? { mixItems: item.mixItems } : {}),
         };
       });
 
-      const invoiceData = {
+      const invoiceData: any = {
         invoiceNumber,
         branchId: selectedBranch?.id || "",
         branchName: selectedBranch?.name || "Main Store",
@@ -720,6 +827,15 @@ export default function POSBillingView() {
         sgstAmount,
         totalPayable,
         paymentMethod,
+        ...(paymentMethod === "Split"
+          ? {
+              splitPayments: {
+                cash: Number(splitCash || 0),
+                upi: Number(splitUpi || 0),
+                card: Number(splitCard || 0),
+              },
+            }
+          : {}),
         status: "completed",
         note: note.trim() || "",
         createdAt: serverTimestamp(),
@@ -1290,7 +1406,7 @@ export default function POSBillingView() {
                   key={item.cartItemId}
                   className="grid grid-cols-12 items-center gap-1 text-xs text-slate-800 border-b border-slate-100 pb-2.5"
                 >
-                  {/* Item info with variation badge */}
+                  {/* Item info with variation & mix badge */}
                   <div className="col-span-5 flex items-center gap-2 min-w-0 pr-1">
                     <div className="w-7 h-7 bg-slate-50 rounded-[4px] border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
                       <img
@@ -1302,17 +1418,30 @@ export default function POSBillingView() {
                         }}
                       />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="font-bold text-slate-900 truncate">{item.product.name}</p>
-                      {item.variant ? (
-                        <div className="flex items-center gap-1 mt-0.5">
+                      
+                      <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                        {item.variant && (
                           <span className="inline-flex items-center px-1.5 py-0.2 rounded-[3px] bg-purple-50 text-purple-700 font-bold text-[9px] border border-purple-200">
                             {item.variant.name}
                           </span>
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-400 truncate">{item.product.barcode || "—"}</p>
-                      )}
+                        )}
+                        {item.mixItems && item.mixItems.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => openEditMixModal(item)}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-[3px] bg-amber-50 text-amber-800 hover:bg-amber-100 font-medium text-[9px] border border-amber-200 cursor-pointer"
+                            title="Click to edit chosen mix flavours"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                            <span className="truncate max-w-[110px]">Mix: {item.mixItems.join(", ")}</span>
+                          </button>
+                        )}
+                        {!item.variant && !item.mixItems && (
+                          <p className="text-[10px] text-slate-400 truncate">{item.product.barcode || "—"}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1425,46 +1554,183 @@ export default function POSBillingView() {
         {/* Payment Methods */}
         <div className="p-4 border-t border-slate-100 bg-white space-y-3">
           <label className="block text-xs font-bold text-slate-700">Select Payment Mode</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-1.5">
             <button
               type="button"
               onClick={() => setPaymentMethod("UPI")}
-              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+              className={`h-[40px] flex flex-col sm:flex-row items-center justify-center gap-1 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
                 paymentMethod === "UPI"
                   ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
                   : "border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <QrCode className="w-4 h-4 text-purple-600" />
-              <span>UPI / QR</span>
+              <QrCode className="w-3.5 h-3.5 text-purple-600" />
+              <span>UPI</span>
             </button>
 
             <button
               type="button"
               onClick={() => setPaymentMethod("Cash")}
-              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+              className={`h-[40px] flex flex-col sm:flex-row items-center justify-center gap-1 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
                 paymentMethod === "Cash"
                   ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
                   : "border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <Banknote className="w-4 h-4 text-emerald-600" />
+              <Banknote className="w-3.5 h-3.5 text-emerald-600" />
               <span>Cash</span>
             </button>
 
             <button
               type="button"
               onClick={() => setPaymentMethod("Card")}
-              className={`h-[40px] flex items-center justify-center gap-1.5 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+              className={`h-[40px] flex flex-col sm:flex-row items-center justify-center gap-1 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
                 paymentMethod === "Card"
                   ? "bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500/20"
                   : "border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <CreditCard className="w-4 h-4 text-blue-600" />
+              <CreditCard className="w-3.5 h-3.5 text-blue-600" />
               <span>Card</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPaymentMethod("Split");
+                if (!splitCash && !splitUpi && !splitCard) {
+                  setSplitCash(totalPayable);
+                  setSplitUpi("");
+                  setSplitCard("");
+                }
+              }}
+              className={`h-[40px] flex flex-col sm:flex-row items-center justify-center gap-1 rounded-[6px] border text-xs font-bold transition-all cursor-pointer ${
+                paymentMethod === "Split"
+                  ? "bg-amber-50 border-amber-500 text-amber-800 ring-2 ring-amber-500/20"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600" />
+              <span>Split</span>
+            </button>
           </div>
+
+          {/* Interactive Split Payment Breakdown Panel */}
+          {paymentMethod === "Split" && (
+            <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-[8px] space-y-2 text-xs animate-in fade-in duration-100">
+              <div className="flex items-center justify-between font-bold text-amber-900 border-b border-amber-200/60 pb-1.5">
+                <span className="flex items-center gap-1">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Split Payment Breakdown</span>
+                </span>
+                {(() => {
+                  const totalSplit = Number(
+                    (Number(splitCash || 0) + Number(splitUpi || 0) + Number(splitCard || 0)).toFixed(2)
+                  );
+                  const rem = Number((totalPayable - totalSplit).toFixed(2));
+                  const isExact = Math.abs(rem) < 0.01;
+                  return (
+                    <span className={isExact ? "text-emerald-700 font-extrabold" : "text-amber-800 font-bold"}>
+                      {isExact ? "✓ Matched (₹ " + totalPayable.toFixed(2) + ")" : "Remaining: ₹ " + rem.toFixed(2)}
+                    </span>
+                  );
+                })()}
+              </div>
+
+              {/* Cash Input */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 w-14 text-slate-700 font-semibold shrink-0">
+                  <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Cash</span>
+                </div>
+                <div className="relative flex-1">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={splitCash}
+                    onChange={(e) => setSplitCash(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                    className="w-full h-[32px] pl-6 pr-2 bg-white border border-slate-200 rounded-[5px] text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const others = Number(splitUpi || 0) + Number(splitCard || 0);
+                    setSplitCash(Math.max(0, Number((totalPayable - others).toFixed(2))));
+                  }}
+                  className="h-[32px] px-2 bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 rounded-[5px] shrink-0 cursor-pointer"
+                  title="Fill remaining amount to Cash"
+                >
+                  Fill Rest
+                </button>
+              </div>
+
+              {/* UPI Input */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 w-14 text-slate-700 font-semibold shrink-0">
+                  <QrCode className="w-3.5 h-3.5 text-purple-600" />
+                  <span>UPI</span>
+                </div>
+                <div className="relative flex-1">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={splitUpi}
+                    onChange={(e) => setSplitUpi(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                    className="w-full h-[32px] pl-6 pr-2 bg-white border border-slate-200 rounded-[5px] text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const others = Number(splitCash || 0) + Number(splitCard || 0);
+                    setSplitUpi(Math.max(0, Number((totalPayable - others).toFixed(2))));
+                  }}
+                  className="h-[32px] px-2 bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 rounded-[5px] shrink-0 cursor-pointer"
+                  title="Fill remaining amount to UPI"
+                >
+                  Fill Rest
+                </button>
+              </div>
+
+              {/* Card Input */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 w-14 text-slate-700 font-semibold shrink-0">
+                  <CreditCard className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Card</span>
+                </div>
+                <div className="relative flex-1">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.00"
+                    value={splitCard}
+                    onChange={(e) => setSplitCard(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                    className="w-full h-[32px] pl-6 pr-2 bg-white border border-slate-200 rounded-[5px] text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const others = Number(splitCash || 0) + Number(splitUpi || 0);
+                    setSplitCard(Math.max(0, Number((totalPayable - others).toFixed(2))));
+                  }}
+                  className="h-[32px] px-2 bg-white hover:bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 rounded-[5px] shrink-0 cursor-pointer"
+                  title="Fill remaining amount to Card"
+                >
+                  Fill Rest
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 pt-1">
             <button
@@ -1613,7 +1879,17 @@ export default function POSBillingView() {
                   <div
                     key={v.name}
                     onClick={() => {
-                      addToCart(selectedProductForVariants, v);
+                      if (isMixProduct(selectedProductForVariants.category)) {
+                        setIsVariantModalOpen(false);
+                        setSelectedProductForMix(selectedProductForVariants);
+                        setSelectedMixVariant(v);
+                        setSelectedMixItemNames([]);
+                        setMixSearchQuery("");
+                        setEditingMixCartItemId(null);
+                        setIsMixModalOpen(true);
+                      } else {
+                        addToCart(selectedProductForVariants, v);
+                      }
                     }}
                     className={`p-3.5 rounded-[8px] border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isSelected
@@ -1686,6 +1962,177 @@ export default function POSBillingView() {
                 className="h-[34px] px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-[6px] text-xs font-bold cursor-pointer transition-colors shadow-xs"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: MIX CATEGORY ITEM SELECTION POPUP */}
+      {/* ========================================================================= */}
+      {isMixModalOpen && selectedProductForMix && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="bg-white rounded-[10px] border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden animate-in zoom-in-95 duration-150 max-h-[90vh]">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/70">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-[6px] bg-amber-600 text-white flex items-center justify-center shadow-xs">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Choose Mix Items / Flavours</h3>
+                  <p className="text-[11px] text-amber-800 font-medium">
+                    {selectedProductForMix.name}
+                    {selectedMixVariant ? ` (${selectedMixVariant.name})` : ""}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMixModalOpen(false);
+                  setSelectedProductForMix(null);
+                  setSelectedMixVariant(undefined);
+                  setSelectedMixItemNames([]);
+                  setEditingMixCartItemId(null);
+                }}
+                className="h-[32px] w-[32px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Selected Items Bar */}
+            <div className="p-3 bg-slate-50 border-b border-slate-100 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">
+                  Selected Items ({selectedMixItemNames.length}):
+                </span>
+                {selectedMixItemNames.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMixItemNames([])}
+                    className="text-[11px] font-semibold text-red-500 hover:text-red-700 cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+              {selectedMixItemNames.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No flavours/items chosen yet. Tap below to add to mix:</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                  {selectedMixItemNames.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-amber-100 text-amber-900 text-xs font-semibold border border-amber-300"
+                    >
+                      <span>{name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMixItemNames((prev) => prev.filter((n) => n !== name))}
+                        className="hover:text-red-600 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Search Filter for Mix Items */}
+            <div className="p-3 border-b border-slate-100 bg-white">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search products / flavours to include in mix..."
+                  value={mixSearchQuery}
+                  onChange={(e) => setMixSearchQuery(e.target.value)}
+                  className="w-full h-[34px] pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            {/* Available Products List */}
+            <div className="p-3 space-y-1.5 flex-1 overflow-y-auto max-h-64 scrollbar-thin">
+              {products
+                .filter((p) => {
+                  if (p.id === selectedProductForMix.id) return false;
+                  if (!mixSearchQuery.trim()) return true;
+                  const q = mixSearchQuery.toLowerCase().trim();
+                  return p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+                })
+                .map((prod) => {
+                  const isChosen = selectedMixItemNames.includes(prod.name);
+                  return (
+                    <div
+                      key={prod.id}
+                      onClick={() => {
+                        if (isChosen) {
+                          setSelectedMixItemNames((prev) => prev.filter((n) => n !== prod.name));
+                        } else {
+                          setSelectedMixItemNames((prev) => [...prev, prod.name]);
+                        }
+                      }}
+                      className={`p-2.5 rounded-[6px] border transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                        isChosen
+                          ? "bg-amber-50/90 border-amber-500 ring-1 ring-amber-500/20"
+                          : "bg-white border-slate-200 hover:border-amber-400 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-5 h-5 rounded-[4px] border flex items-center justify-center transition-colors shrink-0 ${
+                            isChosen ? "bg-amber-600 border-amber-600 text-white" : "border-slate-300 bg-white"
+                          }`}
+                        >
+                          {isChosen && <Check className="w-3.5 h-3.5" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">{prod.name}</p>
+                          <p className="text-[10px] text-slate-400">{prod.category}</p>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
+                          isChosen ? "bg-amber-200/80 text-amber-900" : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {isChosen ? "Selected" : "+ Add"}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMixModalOpen(false);
+                  setSelectedProductForMix(null);
+                  setSelectedMixVariant(undefined);
+                  setSelectedMixItemNames([]);
+                  setEditingMixCartItemId(null);
+                }}
+                className="h-[36px] px-4 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-[6px] text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMixSelection}
+                disabled={selectedMixItemNames.length === 0}
+                className="h-[36px] px-5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+              >
+                <Check className="w-4 h-4" />
+                <span>
+                  {editingMixCartItemId ? "Update Mix Items" : `Add to Bill (${selectedMixItemNames.length} items)`}
+                </span>
               </button>
             </div>
           </div>
@@ -1827,11 +2274,26 @@ export default function POSBillingView() {
                       >
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-bold text-slate-900 truncate">{item.product.name}</p>
-                          {item.variant && (
-                            <span className="inline-flex px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-bold text-[9px] border border-purple-200">
-                              {item.variant.name}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                            {item.variant && (
+                              <span className="inline-flex px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-bold text-[9px] border border-purple-200">
+                                {item.variant.name}
+                              </span>
+                            )}
+                            {item.mixItems && item.mixItems.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsMobileCheckoutOpen(false);
+                                  openEditMixModal(item);
+                                }}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 font-medium text-[9px] border border-amber-200"
+                              >
+                                <Sparkles className="w-2.5 h-2.5 text-amber-600" />
+                                <span>Mix: {item.mixItems.join(", ")}</span>
+                              </button>
+                            )}
+                          </div>
                           <p className="text-[11px] text-slate-500 font-mono mt-0.5">
                             ₹{price.toFixed(2)} × {item.quantity} = <strong className="text-slate-900 font-extrabold">₹{(price * item.quantity).toFixed(2)}</strong>
                           </p>
@@ -1867,8 +2329,8 @@ export default function POSBillingView() {
                 </div>
               </div>
 
-              {/* Discount & Notes */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Discount & Payment Modes */}
+              <div className="space-y-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">Discount (%)</label>
                   <div className="flex items-center gap-1">
@@ -1890,16 +2352,23 @@ export default function POSBillingView() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment</label>
-                  <div className="flex items-center gap-1">
-                    {(["UPI", "Cash", "Card"] as const).map((mode) => (
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment Method</label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {(["UPI", "Cash", "Card", "Split"] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
-                        onClick={() => setPaymentMethod(mode)}
-                        className={`flex-1 py-1 rounded text-[11px] font-bold border transition-colors ${
+                        onClick={() => {
+                          setPaymentMethod(mode);
+                          if (mode === "Split" && !splitCash && !splitUpi && !splitCard) {
+                            setSplitCash(totalPayable);
+                            setSplitUpi("");
+                            setSplitCard("");
+                          }
+                        }}
+                        className={`py-1.5 rounded text-[11px] font-bold border transition-colors ${
                           paymentMethod === mode
-                            ? "bg-blue-600 text-white border-blue-600"
+                            ? "bg-blue-600 text-white border-blue-600 font-extrabold"
                             : "bg-white text-slate-700 border-slate-200"
                         }`}
                       >
@@ -1908,6 +2377,59 @@ export default function POSBillingView() {
                     ))}
                   </div>
                 </div>
+
+                {/* Mobile Split Inputs */}
+                {paymentMethod === "Split" && (
+                  <div className="p-2.5 bg-amber-50 rounded-[8px] border border-amber-200 space-y-2 text-xs">
+                    <div className="flex items-center justify-between font-bold text-amber-900">
+                      <span>Split Allocation</span>
+                      {(() => {
+                        const totalSplit = Number(
+                          (Number(splitCash || 0) + Number(splitUpi || 0) + Number(splitCard || 0)).toFixed(2)
+                        );
+                        const rem = Number((totalPayable - totalSplit).toFixed(2));
+                        return (
+                          <span className={Math.abs(rem) < 0.01 ? "text-emerald-700" : "text-amber-800"}>
+                            {Math.abs(rem) < 0.01 ? "✓ Matched" : "Rem: ₹" + rem.toFixed(2)}
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Cash (₹)</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={splitCash}
+                          onChange={(e) => setSplitCash(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                          className="w-full h-[30px] px-2 bg-white border border-slate-200 rounded text-xs font-mono font-bold"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">UPI (₹)</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={splitUpi}
+                          onChange={(e) => setSplitUpi(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                          className="w-full h-[30px] px-2 bg-white border border-slate-200 rounded text-xs font-mono font-bold"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Card (₹)</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          value={splitCard}
+                          onChange={(e) => setSplitCard(e.target.value === "" ? "" : Math.max(0, Number(e.target.value)))}
+                          className="w-full h-[30px] px-2 bg-white border border-slate-200 rounded text-xs font-mono font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Total Calculation */}
@@ -2297,8 +2819,32 @@ export default function POSBillingView() {
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
                   <span>Payment Mode:</span>
-                  <span className="font-bold text-blue-600 uppercase">{completedInvoice.paymentMethod}</span>
+                  <span className="font-bold text-blue-600 uppercase">
+                    {completedInvoice.paymentMethod === "Split" ? "SPLIT PAYMENT" : completedInvoice.paymentMethod}
+                  </span>
                 </div>
+                {completedInvoice.paymentMethod === "Split" && completedInvoice.splitPayments && (
+                  <div className="bg-slate-50 p-2 rounded border border-slate-200 text-[10px] space-y-0.5 mt-1 font-mono">
+                    {Number(completedInvoice.splitPayments.cash || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• Cash:</span>
+                        <span className="font-bold">₹ {Number(completedInvoice.splitPayments.cash).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(completedInvoice.splitPayments.upi || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• UPI / QR:</span>
+                        <span className="font-bold">₹ {Number(completedInvoice.splitPayments.upi).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(completedInvoice.splitPayments.card || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• Card:</span>
+                        <span className="font-bold">₹ {Number(completedInvoice.splitPayments.card).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Thank you message from Settings */}

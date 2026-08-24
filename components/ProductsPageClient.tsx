@@ -960,9 +960,9 @@ export default function ProductsPageClient() {
       </div>
 
       {/* Main Content Area */}
-      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col">
+      <div className="bg-white rounded-[6px] border border-slate-200 shadow-xs flex flex-col relative z-20">
         {/* Search & Filter Bar */}
-        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0 relative z-30">
           <div className="relative flex-1 w-full max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -981,7 +981,7 @@ export default function ProductsPageClient() {
           </div>
 
           {activeTab === "products" && (
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
+            <div className="flex items-center gap-2 w-full md:w-auto flex-wrap sm:flex-nowrap">
               {/* Category Filter Dropdown */}
               <CustomSelect
                 value={selectedCategoryFilter}
@@ -991,7 +991,8 @@ export default function ProductsPageClient() {
                   ...categories.map((c) => ({ value: c.name, label: c.name })),
                 ]}
                 searchable={true}
-                className="w-48"
+                align="right"
+                className="w-full sm:w-48"
               />
 
               {/* Status Filter */}
@@ -1004,7 +1005,8 @@ export default function ProductsPageClient() {
                   { value: "inactive", label: "Inactive Only" },
                   { value: "favorites", label: "Favorites ⭐" },
                 ]}
-                className="w-40"
+                align="right"
+                className="w-full sm:w-40"
               />
             </div>
           )}
@@ -1012,7 +1014,7 @@ export default function ProductsPageClient() {
 
         {/* TAB 1: PRODUCTS TABLE */}
         {activeTab === "products" && (
-          <div className="flex flex-col">
+          <div className="flex flex-col relative z-10">
             {loading ? (
               <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2">
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
@@ -1040,7 +1042,7 @@ export default function ProductsPageClient() {
               <>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-5">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0 z-10">
                       <tr>
                         <th className="py-3 px-4 w-12 text-center">Fav</th>
                         <th className="py-3 px-4">Product Info</th>

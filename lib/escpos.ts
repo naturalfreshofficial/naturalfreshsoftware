@@ -387,7 +387,20 @@ export function generateInvoiceReceiptBytes(
     .size("normal")
     .bold(false);
 
-  builder.twoColumns("Payment Mode:", invoice.paymentMethod.toUpperCase(), true);
+  if (invoice.paymentMethod === "Split" && invoice.splitPayments) {
+    builder.twoColumns("Payment Mode:", "SPLIT", true);
+    if (Number(invoice.splitPayments.cash || 0) > 0) {
+      builder.twoColumns("  - Cash:", `Rs. ${Number(invoice.splitPayments.cash).toFixed(2)}`);
+    }
+    if (Number(invoice.splitPayments.upi || 0) > 0) {
+      builder.twoColumns("  - UPI:", `Rs. ${Number(invoice.splitPayments.upi).toFixed(2)}`);
+    }
+    if (Number(invoice.splitPayments.card || 0) > 0) {
+      builder.twoColumns("  - Card:", `Rs. ${Number(invoice.splitPayments.card).toFixed(2)}`);
+    }
+  } else {
+    builder.twoColumns("Payment Mode:", (invoice.paymentMethod || "CASH").toUpperCase(), true);
+  }
 
   builder.divider();
 

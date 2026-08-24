@@ -144,8 +144,30 @@ export async function POST(req: NextRequest) {
       const grandTotalVal = `Rs. ${Number(invoice.totalPayable).toFixed(2)}`;
       const grandTotalSpaces = Math.max(1, 32 - "GRAND TOTAL:".length - grandTotalVal.length);
 
-      const payMode = (invoice.paymentMethod || "CASH").toUpperCase();
-      const payModeSpaces = Math.max(1, 32 - "Payment Mode:".length - payMode.length);
+      let paymentModeXml = "";
+      if (invoice.paymentMethod === "Split" && invoice.splitPayments) {
+        const splitLines = ["<text width=\"1\" height=\"1\" bold=\"true\">Payment Mode:           SPLIT&#10;</text>"];
+        if (Number(invoice.splitPayments.cash || 0) > 0) {
+          const cVal = `Rs. ${Number(invoice.splitPayments.cash).toFixed(2)}`;
+          const cSp = Math.max(1, 32 - "  - Cash:".length - cVal.length);
+          splitLines.push(`<text>${escapeXml("  - Cash:" + " ".repeat(cSp) + cVal)}&#10;</text>`);
+        }
+        if (Number(invoice.splitPayments.upi || 0) > 0) {
+          const uVal = `Rs. ${Number(invoice.splitPayments.upi).toFixed(2)}`;
+          const uSp = Math.max(1, 32 - "  - UPI:".length - uVal.length);
+          splitLines.push(`<text>${escapeXml("  - UPI:" + " ".repeat(uSp) + uVal)}&#10;</text>`);
+        }
+        if (Number(invoice.splitPayments.card || 0) > 0) {
+          const cdVal = `Rs. ${Number(invoice.splitPayments.card).toFixed(2)}`;
+          const cdSp = Math.max(1, 32 - "  - Card:".length - cdVal.length);
+          splitLines.push(`<text>${escapeXml("  - Card:" + " ".repeat(cdSp) + cdVal)}&#10;</text>`);
+        }
+        paymentModeXml = splitLines.join("\n");
+      } else {
+        const payMode = (invoice.paymentMethod || "CASH").toUpperCase();
+        const payModeSpaces = Math.max(1, 32 - "Payment Mode:".length - payMode.length);
+        paymentModeXml = `<text width="1" height="1" bold="true">${escapeXml("Payment Mode:" + " ".repeat(payModeSpaces) + payMode)}&#10;</text>`;
+      }
 
       eposXml = `
         <text align="center" width="2" height="2" smooth="true">${escapeXml(storeName)}&#10;</text>
@@ -171,7 +193,7 @@ export async function POST(req: NextRequest) {
         ${gstXml}
         <text>================================&#10;</text>
         <text width="2" height="2" bold="true">${escapeXml("TOTAL: " + grandTotalVal)}&#10;</text>
-        <text width="1" height="1" bold="true">${escapeXml("Payment Mode:" + " ".repeat(payModeSpaces) + payMode)}&#10;</text>
+        ${paymentModeXml}
         <text>--------------------------------&#10;</text>
         <text align="center">${footerXml}</text>
         <text align="center">Software by GamaNext&#10;</text>

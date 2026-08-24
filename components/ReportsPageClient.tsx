@@ -32,6 +32,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  SlidersHorizontal,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
@@ -289,16 +290,24 @@ export default function ReportsPageClient() {
     return filteredInvoices.reduce((acc, inv) => acc + (Number(inv.itemCount) || 0), 0);
   }, [filteredInvoices]);
 
-  // Payment Breakdown
+  // Payment Breakdown with Split Payment Distribution
   const paymentBreakdown = useMemo(() => {
     let upi = 0;
     let cash = 0;
     let card = 0;
     filteredInvoices.forEach((inv) => {
       const amount = Number(inv.totalPayable) || 0;
-      if (inv.paymentMethod === "UPI") upi += amount;
-      else if (inv.paymentMethod === "Cash") cash += amount;
-      else if (inv.paymentMethod === "Card") card += amount;
+      if (inv.paymentMethod === "Split" && inv.splitPayments) {
+        cash += Number(inv.splitPayments.cash || 0);
+        upi += Number(inv.splitPayments.upi || 0);
+        card += Number(inv.splitPayments.card || 0);
+      } else if (inv.paymentMethod === "UPI") {
+        upi += amount;
+      } else if (inv.paymentMethod === "Cash") {
+        cash += amount;
+      } else if (inv.paymentMethod === "Card") {
+        card += amount;
+      }
     });
     return { upi, cash, card };
   }, [filteredInvoices]);
@@ -314,6 +323,11 @@ export default function ReportsPageClient() {
       const dateStr = inv.createdAt?.toDate
         ? inv.createdAt.toDate().toLocaleString()
         : "—";
+      const payModeStr =
+        inv.paymentMethod === "Split" && inv.splitPayments
+          ? `SPLIT (Cash: ₹${inv.splitPayments.cash || 0}, UPI: ₹${inv.splitPayments.upi || 0}, Card: ₹${inv.splitPayments.card || 0})`
+          : inv.paymentMethod || "UPI";
+
       return {
         "SL No": idx + 1,
         "Invoice Number": inv.invoiceNumber,
@@ -326,8 +340,7 @@ export default function ReportsPageClient() {
         "Discount (INR)": inv.discountAmount || 0,
         "GST Tax (INR)": inv.taxAmount || 0,
         "Total Paid (INR)": inv.totalPayable || 0,
-        "Payment Mode": inv.paymentMethod || "UPI",
-        "Status": inv.status || "completed",
+        "Payment Mode": payModeStr,
       };
     });
 
@@ -512,6 +525,7 @@ export default function ReportsPageClient() {
                   { value: "UPI", label: "UPI Only", icon: <QrCode className="w-3.5 h-3.5 text-blue-600" /> },
                   { value: "Cash", label: "Cash Only", icon: <Banknote className="w-3.5 h-3.5 text-emerald-600" /> },
                   { value: "Card", label: "Card Only", icon: <CreditCard className="w-3.5 h-3.5 text-indigo-600" /> },
+                  { value: "Split", label: "Split Only", icon: <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600" /> },
                 ]}
                 align="right"
                 className="w-36"
@@ -609,12 +623,15 @@ export default function ReportsPageClient() {
                               ? "bg-blue-50 text-blue-700 border-blue-200"
                               : inv.paymentMethod === "Cash"
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : inv.paymentMethod === "Split"
+                              ? "bg-amber-50 text-amber-800 border-amber-300"
                               : "bg-indigo-50 text-indigo-700 border-indigo-200"
                           }`}
                         >
                           {inv.paymentMethod === "UPI" && <QrCode className="w-3 h-3" />}
                           {inv.paymentMethod === "Cash" && <Banknote className="w-3 h-3" />}
                           {inv.paymentMethod === "Card" && <CreditCard className="w-3 h-3" />}
+                          {inv.paymentMethod === "Split" && <SlidersHorizontal className="w-3 h-3 text-amber-600" />}
                           <span>{inv.paymentMethod}</span>
                         </span>
                       </td>
@@ -821,7 +838,15 @@ export default function ReportsPageClient() {
                 <tbody className="divide-y divide-slate-100 text-[11px]">
                   {inspectInvoice.items?.map((it, idx) => (
                     <tr key={idx}>
-                      <td className="py-1.5 font-medium text-slate-800">{it.name}</td>
+                      <td className="py-1.5 font-medium text-slate-800">
+                        <div>{it.name}</div>
+                        {it.mixItems && it.mixItems.length > 0 && (
+                          <div className="text-[10px] text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 inline-block">
+                            <span className="font-bold">Mix Items: </span>
+                            <span>{it.mixItems.join(", ")}</span>
+                          </div>
+                        )}
+                      </td>
                       <td className="py-1.5 text-center text-slate-600">{it.quantity}</td>
                       <td className="py-1.5 text-right text-slate-600">₹{Number(it.price).toFixed(2)}</td>
                       <td className="py-1.5 text-right font-bold text-slate-900">₹{Number(it.total).toFixed(2)}</td>
@@ -852,8 +877,32 @@ export default function ReportsPageClient() {
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
                   <span>Payment Method:</span>
-                  <span className="font-bold text-blue-600 uppercase">{inspectInvoice.paymentMethod}</span>
+                  <span className="font-bold text-blue-600 uppercase">
+                    {inspectInvoice.paymentMethod === "Split" ? "SPLIT PAYMENT" : inspectInvoice.paymentMethod}
+                  </span>
                 </div>
+                {inspectInvoice.paymentMethod === "Split" && inspectInvoice.splitPayments && (
+                  <div className="bg-slate-50 p-2 rounded border border-slate-200 text-[10px] space-y-0.5 mt-1 font-mono">
+                    {Number(inspectInvoice.splitPayments.cash || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• Cash:</span>
+                        <span className="font-bold">₹ {Number(inspectInvoice.splitPayments.cash).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(inspectInvoice.splitPayments.upi || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• UPI / QR:</span>
+                        <span className="font-bold">₹ {Number(inspectInvoice.splitPayments.upi).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(inspectInvoice.splitPayments.card || 0) > 0 && (
+                      <div className="flex justify-between text-slate-700">
+                        <span>• Card:</span>
+                        <span className="font-bold">₹ {Number(inspectInvoice.splitPayments.card).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

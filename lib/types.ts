@@ -66,6 +66,13 @@ export interface InvoiceItem {
   variantName?: string;
   weightInKg?: number;
   totalWeightInKg?: number;
+  mixItems?: string[];
+}
+
+export interface SplitPayments {
+  cash?: number;
+  upi?: number;
+  card?: number;
 }
 
 export interface Invoice {
@@ -91,7 +98,8 @@ export interface Invoice {
   cgstAmount?: number;
   sgstAmount?: number;
   totalPayable: number;
-  paymentMethod: "UPI" | "Cash" | "Card";
+  paymentMethod: "UPI" | "Cash" | "Card" | "Split" | string;
+  splitPayments?: SplitPayments;
   status: "completed" | "draft" | "cancelled";
   branchId?: string;
   branchName?: string;
