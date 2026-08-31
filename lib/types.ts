@@ -192,7 +192,10 @@ export interface BranchStock {
   productName?: string;
   branchId: string;
   branchName?: string;
-  quantity: number;
+  quantity?: number;
+  kg?: number;
+  halfKg?: number;
+  fms?: number;
   updatedAt?: any;
 }
 

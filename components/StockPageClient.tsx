@@ -170,7 +170,14 @@ export default function StockPageClient() {
         snapshot.forEach((docSnap) => {
           const d = docSnap.data();
           if (d.productId && d.branchId) {
-            map[`${d.productId}_${d.branchId}`] = Number(d.quantity) || 0;
+            const kg = d.kg !== undefined ? Number(d.kg) : 0;
+            const halfKg = Number(d.halfKg) || 0;
+            const fms = Number(d.fms) || 0;
+            const totalQty =
+              d.kg !== undefined || d.halfKg !== undefined || d.fms !== undefined
+                ? kg + halfKg + fms
+                : Number(d.quantity) || 0;
+            map[`${d.productId}_${d.branchId}`] = totalQty;
           }
         });
         setBranchStockMap(map);

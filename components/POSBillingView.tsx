@@ -396,27 +396,9 @@ export default function POSBillingView() {
       return;
     }
 
-    const availableStockKg = getProductStockForSelectedBranch(product.id, product.stock);
     const mixKey = mixItems && mixItems.length > 0 ? `_mix_${[...mixItems].sort().join(",")}` : "";
     const cartItemId = variant ? `${product.id}_${variant.name}${mixKey}` : `${product.id}${mixKey}`;
     const existing = cart.find((item) => item.cartItemId === cartItemId);
-    
-    // Calculate total KG of this product currently in cart across all variants
-    const currentTotalProductKgInCart = cart
-      .filter((item) => item.product.id === product.id)
-      .reduce((sum, item) => sum + getItemKgWeight(item.variant?.name, item.variant?.weightInKg) * item.quantity, 0);
-
-    const requiredItemKg = getItemKgWeight(variant?.name, variant?.weightInKg);
-
-    if (availableStockKg <= 0) {
-      toast.warning(`"${product.name}" is OUT OF STOCK at ${selectedBranch?.name || "this branch"}.`);
-      return;
-    }
-
-    if (currentTotalProductKgInCart + requiredItemKg > availableStockKg) {
-      toast.warning(`Cannot add more. Only ${formatKgStock(availableStockKg)} available at ${selectedBranch?.name || "this branch"}.`);
-      return;
-    }
 
     setCart((prev) => {
       if (existing) {
@@ -472,20 +454,6 @@ export default function POSBillingView() {
   const updateQuantity = (cartItemId: string, delta: number) => {
     const itemInCart = cart.find((item) => item.cartItemId === cartItemId);
     if (!itemInCart) return;
-
-    if (delta > 0) {
-      const availableStockKg = getProductStockForSelectedBranch(itemInCart.product.id, itemInCart.product.stock);
-      const totalProductKg = cart
-        .filter((item) => item.product.id === itemInCart.product.id)
-        .reduce((sum, item) => sum + getItemKgWeight(item.variant?.name, item.variant?.weightInKg) * item.quantity, 0);
-
-      const requiredDeltaKg = getItemKgWeight(itemInCart.variant?.name, itemInCart.variant?.weightInKg) * delta;
-
-      if (totalProductKg + requiredDeltaKg > availableStockKg) {
-        toast.warning(`Cannot add more. Only ${formatKgStock(availableStockKg)} available at ${selectedBranch?.name || "this branch"}.`);
-        return;
-      }
-    }
 
     setCart((prev) =>
       prev
@@ -854,41 +822,8 @@ export default function POSBillingView() {
         }
       }
 
-      // 3. Atomically decrement stock in Firestore branch_stocks and products (in KGs)
-      // Core rule: 12 single scoops = 1 KG => 1 single scoop = 1/12 KG = ~0.0833 KG
-      try {
-        const batch = writeBatch(db);
-        cart.forEach((item) => {
-          if (item.product.id) {
-            const itemKg = getItemKgWeight(item.variant?.name, item.variant?.weightInKg);
-            const totalKgDeduction = Number((itemKg * item.quantity).toFixed(4));
+      // 3. Manual stock management mode: Automatic scoop deduction on checkout removed
 
-            const prodRef = doc(db, "products", item.product.id);
-            batch.update(prodRef, {
-              stock: increment(-totalKgDeduction),
-            });
-
-            if (selectedBranch?.id) {
-              const branchStockRef = doc(db, "branch_stocks", `${item.product.id}_${selectedBranch.id}`);
-              batch.set(
-                branchStockRef,
-                {
-                  productId: item.product.id,
-                  productName: item.product.name,
-                  branchId: selectedBranch.id,
-                  branchName: selectedBranch.name,
-                  quantity: increment(-totalKgDeduction),
-                  updatedAt: serverTimestamp(),
-                },
-                { merge: true }
-              );
-            }
-          }
-        });
-        await batch.commit();
-      } catch (stockErr) {
-        console.warn("Stock decrement warning:", stockErr);
-      }
 
       // 4. Update customer stats (if registered customer)
       if (selectedCustomer?.id && selectedCustomer.id !== "walk_in") {
