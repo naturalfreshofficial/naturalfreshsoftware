@@ -544,6 +544,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }
 
+    const invoiceHasGst = invoice.taxAmount !== undefined ? Number(invoice.taxAmount) > 0 : settings.enableGst;
     const receiptOpts: ReceiptOptions = {
       paperWidth: settings.paperWidth,
       storeName: settings.storeName,
@@ -551,7 +552,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({
       storePhone: settings.storePhone,
       storeEmail: settings.storeEmail,
       storeGst: settings.storeGst,
-      enableGst: settings.enableGst,
+      enableGst: settings.enableGst && invoiceHasGst,
       cgstPercent: settings.cgstPercent,
       sgstPercent: settings.sgstPercent,
       footerMessage: settings.footerMessage,

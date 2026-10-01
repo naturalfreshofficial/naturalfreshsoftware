@@ -26,7 +26,9 @@ export async function POST(req: NextRequest) {
     const address = (settings?.storeAddress || "Guntur, Andhra Pradesh").trim();
     const phone = (settings?.storePhone || "").trim();
     const gstin = (settings?.storeGst || "").trim();
-    const isGst = settings?.enableGst !== false;
+    const isGst =
+      settings?.enableGst !== false &&
+      (invoice?.taxAmount !== undefined ? Number(invoice.taxAmount) > 0 : true);
     const footer = (
       settings?.footerMessage || "Thank you for visiting! Please visit again!"
     ).trim();

@@ -6,6 +6,11 @@ import {
   onSnapshot,
   query,
   where,
+  deleteDoc,
+  doc,
+  updateDoc,
+  increment,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Invoice, Branch } from "@/lib/types";
@@ -33,6 +38,9 @@ import {
   ChevronsLeft,
   ChevronsRight,
   SlidersHorizontal,
+  Trash2,
+  AlertTriangle,
+  FileText,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useToast } from "@/components/ToastProvider";
@@ -99,6 +107,46 @@ export default function ReportsPageClient() {
 
   // Invoice Inspection Modal
   const [inspectInvoice, setInspectInvoice] = useState<Invoice | null>(null);
+
+  // Invoice Deletion State
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Handle Confirm Delete Invoice
+  const handleConfirmDelete = async () => {
+    if (!invoiceToDelete) return;
+    setIsDeleting(true);
+    try {
+      // 1. Delete invoice from Firestore
+      await deleteDoc(doc(db, "invoices", invoiceToDelete.id));
+
+      // 2. Adjust customer lifetime stats if registered customer
+      if (invoiceToDelete.customer?.id && invoiceToDelete.customer.id !== "walk_in") {
+        try {
+          await updateDoc(doc(db, "customers", invoiceToDelete.customer.id), {
+            totalOrders: increment(-1),
+            totalSpent: increment(-Number(invoiceToDelete.totalPayable || 0)),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (custErr) {
+          console.warn("Failed to adjust customer stats on invoice deletion:", custErr);
+        }
+      }
+
+      toast.success(`Invoice "${invoiceToDelete.invoiceNumber}" deleted successfully.`);
+
+      // Close inspect modal if viewing the deleted invoice
+      if (inspectInvoice?.id === invoiceToDelete.id) {
+        setInspectInvoice(null);
+      }
+      setInvoiceToDelete(null);
+    } catch (err: any) {
+      console.error("Delete invoice error:", err);
+      toast.error("Failed to delete invoice: " + (err.message || "Unknown error"));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // 1. Subscribe to Completed Invoices in Firestore
   useEffect(() => {
@@ -653,15 +701,25 @@ export default function ReportsPageClient() {
 
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setInspectInvoice(inv)}
-                          title="View and Print Invoice"
-                          className="h-[30px] px-2.5 inline-flex items-center gap-1 rounded-[5px] bg-slate-100 hover:bg-blue-50 hover:text-blue-600 border border-slate-200 text-slate-700 text-[11px] font-bold transition-colors cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Receipt</span>
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setInspectInvoice(inv)}
+                            title="View Invoice Details & Receipt"
+                            className="h-[30px] px-2.5 inline-flex items-center gap-1 rounded-[5px] bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInvoiceToDelete(inv)}
+                            title="Delete Invoice"
+                            className="h-[30px] w-[30px] inline-flex items-center justify-center rounded-[5px] bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -776,36 +834,59 @@ export default function ReportsPageClient() {
             {/* Header */}
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center">
+                <div className="w-8 h-8 rounded-[6px] bg-blue-600 text-white flex items-center justify-center shadow-xs">
                   <Receipt className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Tax Invoice Receipt</h3>
-                  <p className="text-[10px] font-mono text-slate-500">{inspectInvoice.invoiceNumber}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-mono text-slate-500">{inspectInvoice.invoiceNumber}</p>
+                    <span className="text-[9px] px-1.5 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-bold uppercase">
+                      Completed
+                    </span>
+                  </div>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setInspectInvoice(null)}
-                className="h-[32px] w-[32px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-200"
+                className="h-[32px] w-[32px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-[6px] hover:bg-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Printable Receipt Area */}
-            <div className="p-6 space-y-4 text-xs bg-white text-slate-800">
+            <div className="p-6 space-y-4 text-xs bg-white text-slate-800 overflow-y-auto max-h-[68vh]">
               {/* Store Header */}
               <div className="text-center border-b border-dashed border-slate-300 pb-3">
                 <div className="w-12 h-12 mx-auto mb-1 rounded-[6px] overflow-hidden">
                   <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                 </div>
-                <h4 className="text-base font-extrabold text-slate-900">NATURAL FRESH</h4>
+                <h4 className="text-base font-extrabold text-slate-900">
+                  {printer.settings.storeName || "NATURAL FRESH"}
+                </h4>
+                {printer.settings.tagline && (
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    {printer.settings.tagline}
+                  </p>
+                )}
                 <p className="text-[11px] font-bold text-blue-700">
                   Outlet: {inspectInvoice.branchName || "Main Store"}
                 </p>
-                <p className="text-[11px] text-slate-500">Guntur, Andhra Pradesh</p>
-                <p className="text-[11px] text-slate-500 font-mono">GSTIN: 37AAAAA0000A1Z5</p>
+                <p className="text-[11px] text-slate-500">
+                  {printer.settings.storeAddress || "Guntur, Andhra Pradesh"}
+                </p>
+                {printer.settings.storePhone && (
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Ph: {printer.settings.storePhone}
+                  </p>
+                )}
+                {inspectInvoice.taxAmount > 0 && printer.settings.storeGst && (
+                  <p className="text-[11px] text-slate-700 font-bold font-mono">
+                    GSTIN: {printer.settings.storeGst}
+                  </p>
+                )}
               </div>
 
               {/* Invoice Metadata */}
@@ -815,13 +896,22 @@ export default function ReportsPageClient() {
                   <p className="text-slate-500">
                     Date:{" "}
                     {inspectInvoice.createdAt?.toDate
-                      ? inspectInvoice.createdAt.toDate().toLocaleString()
+                      ? inspectInvoice.createdAt.toDate().toLocaleString("en-IN", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })
                       : "—"}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="font-bold text-slate-900">{inspectInvoice.customer?.name}</p>
-                  <p className="text-slate-500 font-mono">{inspectInvoice.customer?.phone}</p>
+                  <p className="font-bold text-slate-900">{inspectInvoice.customer?.name || "Walk-in Customer"}</p>
+                  {inspectInvoice.customer?.phone && (
+                    <p className="text-slate-500 font-mono">{inspectInvoice.customer.phone}</p>
+                  )}
                 </div>
               </div>
 
@@ -839,17 +929,22 @@ export default function ReportsPageClient() {
                   {inspectInvoice.items?.map((it, idx) => (
                     <tr key={idx}>
                       <td className="py-1.5 font-medium text-slate-800">
-                        <div>{it.name}</div>
+                        <div>
+                          {it.name}
+                          {it.variantName && (
+                            <span className="text-[10px] text-slate-500 font-normal"> ({it.variantName})</span>
+                          )}
+                        </div>
                         {it.mixItems && it.mixItems.length > 0 && (
                           <div className="text-[10px] text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 inline-block">
-                            <span className="font-bold">Mix Items: </span>
+                            <span className="font-bold">Mix: </span>
                             <span>{it.mixItems.join(", ")}</span>
                           </div>
                         )}
                       </td>
-                      <td className="py-1.5 text-center text-slate-600">{it.quantity}</td>
-                      <td className="py-1.5 text-right text-slate-600">₹{Number(it.price).toFixed(2)}</td>
-                      <td className="py-1.5 text-right font-bold text-slate-900">₹{Number(it.total).toFixed(2)}</td>
+                      <td className="py-1.5 text-center text-slate-600 font-mono">{it.quantity}</td>
+                      <td className="py-1.5 text-right text-slate-600 font-mono">₹{Number(it.price).toFixed(2)}</td>
+                      <td className="py-1.5 text-right font-bold text-slate-900 font-mono">₹{Number(it.total).toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -858,25 +953,46 @@ export default function ReportsPageClient() {
               {/* Calculations Breakdown */}
               <div className="border-t border-dashed border-slate-300 pt-2 space-y-1 text-[11px]">
                 <div className="flex justify-between text-slate-600">
-                  <span>Subtotal</span>
-                  <span className="font-semibold">₹ {Number(inspectInvoice.subtotal).toFixed(2)}</span>
+                  <span>Subtotal ({inspectInvoice.itemCount || inspectInvoice.items?.length || 0} items)</span>
+                  <span className="font-semibold font-mono">₹ {Number(inspectInvoice.subtotal).toFixed(2)}</span>
                 </div>
                 {inspectInvoice.discountAmount > 0 && (
                   <div className="flex justify-between text-red-600">
                     <span>Discount ({inspectInvoice.discountPercent}%)</span>
-                    <span>- ₹ {Number(inspectInvoice.discountAmount).toFixed(2)}</span>
+                    <span className="font-mono">- ₹ {Number(inspectInvoice.discountAmount).toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-slate-600">
-                  <span>GST Tax (5%)</span>
-                  <span className="font-semibold">₹ {Number(inspectInvoice.taxAmount).toFixed(2)}</span>
-                </div>
+                {inspectInvoice.taxAmount > 0 ? (
+                  <>
+                    <div className="flex justify-between text-slate-600">
+                      <span>CGST ({inspectInvoice.cgstPercent || (inspectInvoice.taxPercent ? inspectInvoice.taxPercent / 2 : 2.5)}%)</span>
+                      <span className="font-mono">
+                        ₹ {(inspectInvoice.cgstAmount ?? inspectInvoice.taxAmount / 2).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>SGST ({inspectInvoice.sgstPercent || (inspectInvoice.taxPercent ? inspectInvoice.taxPercent / 2 : 2.5)}%)</span>
+                      <span className="font-mono">
+                        ₹ {(inspectInvoice.sgstAmount ?? inspectInvoice.taxAmount / 2).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-700 font-semibold">
+                      <span>Total GST ({inspectInvoice.taxPercent || 5}%)</span>
+                      <span className="font-mono">₹ {Number(inspectInvoice.taxAmount).toFixed(2)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between text-slate-400">
+                    <span>GST Tax</span>
+                    <span className="font-mono">₹ 0.00 (Not Applied)</span>
+                  </div>
+                )}
                 <div className="border-t border-slate-200 pt-1.5 flex justify-between text-sm font-extrabold text-slate-950">
-                  <span>Total Paid</span>
-                  <span>₹ {Number(inspectInvoice.totalPayable).toFixed(2)}</span>
+                  <span>GRAND TOTAL</span>
+                  <span className="text-blue-600 font-mono">₹ {Number(inspectInvoice.totalPayable).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-[10px] text-slate-500 pt-0.5">
-                  <span>Payment Method:</span>
+                  <span>Payment Mode:</span>
                   <span className="font-bold text-blue-600 uppercase">
                     {inspectInvoice.paymentMethod === "Split" ? "SPLIT PAYMENT" : inspectInvoice.paymentMethod}
                   </span>
@@ -903,18 +1019,36 @@ export default function ReportsPageClient() {
                     )}
                   </div>
                 )}
+                {inspectInvoice.note && (
+                  <div className="mt-2 p-2 bg-amber-50/70 border border-amber-200 rounded text-[10px] text-amber-900 flex items-start gap-1">
+                    <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                    <span><span className="font-bold">Note: </span>{inspectInvoice.note}</span>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Actions */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setInspectInvoice(null)}
-                className="w-full sm:w-auto h-[36px] px-4 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setInspectInvoice(null)}
+                  className="h-[36px] px-3.5 bg-white border border-slate-200 text-slate-700 rounded-[6px] text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceToDelete(inspectInvoice)}
+                  className="h-[36px] px-3 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Delete this invoice"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                  <span>Delete</span>
+                </button>
+              </div>
+
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                 <button
                   type="button"
@@ -958,6 +1092,75 @@ export default function ReportsPageClient() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* DELETE CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {invoiceToDelete && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-[10px] border border-slate-200 shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Invoice</h3>
+                <p className="text-xs text-slate-500">
+                  Are you sure you want to delete this invoice? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-[8px] border border-slate-200 mb-5 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Invoice Number:</span>
+                <span className="font-mono font-bold text-slate-900">{invoiceToDelete.invoiceNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Customer:</span>
+                <span className="font-semibold text-slate-800">{invoiceToDelete.customer?.name || "Walk-in Customer"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Total Amount:</span>
+                <span className="font-bold text-red-600 font-mono">₹ {Number(invoiceToDelete.totalPayable).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Total Items:</span>
+                <span className="text-slate-700">{invoiceToDelete.itemCount || invoiceToDelete.items?.length || 0} Units</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setInvoiceToDelete(null)}
+                disabled={isDeleting}
+                className="h-[36px] px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-[6px] text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="h-[36px] px-4 bg-red-600 hover:bg-red-700 text-white rounded-[6px] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

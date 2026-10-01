@@ -159,6 +159,7 @@ export default function POSBillingView() {
   // Cart State (Initialized empty with NO static data)
   const [cart, setCart] = useState<POSCartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
+  const [includeGst, setIncludeGst] = useState<boolean>(true);
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"UPI" | "Cash" | "Card" | "Split">("UPI");
   const [splitCash, setSplitCash] = useState<number | "">("");
@@ -328,7 +329,7 @@ export default function POSBillingView() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Filtered Products for Display
+  // Filtered Products for Display (Displays all items)
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchesCategory =
@@ -476,6 +477,7 @@ export default function POSBillingView() {
     setCart([]);
     setSelectedCustomer(null);
     setDiscountPercent(0);
+    setIncludeGst(true);
     setNote("");
     setPaymentMethod("UPI");
     setSplitCash("");
@@ -484,10 +486,10 @@ export default function POSBillingView() {
     setActiveDraftId(null);
   };
 
-  // Calculations based on dynamic GST Settings
-  const isGstEnabled = printer.settings.enableGst ?? true;
-  const cgstPercent = isGstEnabled ? Number(printer.settings.cgstPercent ?? 2.5) : 0;
-  const sgstPercent = isGstEnabled ? Number(printer.settings.sgstPercent ?? 2.5) : 0;
+  // Calculations based on dynamic GST Settings & Billing Toggle
+  const isGstEnabled = includeGst;
+  const cgstPercent = isGstEnabled ? Number(printer.settings.cgstPercent || 2.5) : 0;
+  const sgstPercent = isGstEnabled ? Number(printer.settings.sgstPercent || 2.5) : 0;
   const totalGstRate = cgstPercent + sgstPercent;
 
   const totalItemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
@@ -684,6 +686,11 @@ export default function POSBillingView() {
 
     setCart(restoredCart);
     setDiscountPercent(draft.discountPercent || 0);
+    setIncludeGst(
+      draft.taxAmount !== undefined
+        ? Number(draft.taxAmount) > 0
+        : (draft.taxPercent ? Number(draft.taxPercent) > 0 : true)
+    );
     setNote(draft.note || "");
     setPaymentMethod((draft.paymentMethod as any) || "UPI");
     if (draft.splitPayments) {
@@ -994,7 +1001,6 @@ export default function POSBillingView() {
                 const inCartTotalQty = cartProductQuantities.get(product.id) || 0;
                 const isSelectedInCart = inCartTotalQty > 0;
                 const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
-                const isOutOfStock = branchStock <= 0;
                 const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
                 const hasVariants = product.hasVariations && product.variants && product.variants.length > 0;
                 const minPrice = hasVariants ? Math.min(...product.variants!.map((v) => v.price)) : product.price;
@@ -1004,9 +1010,7 @@ export default function POSBillingView() {
                     key={product.id}
                     onClick={() => addToCart(product)}
                     className={`group bg-white rounded-[6px] border transition-all duration-150 p-3.5 flex flex-col justify-between cursor-pointer relative ${
-                      isOutOfStock
-                        ? "border-slate-200 bg-slate-50/60 opacity-75"
-                        : isSelectedInCart
+                      isSelectedInCart
                         ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/10 shadow-xs"
                         : "border-slate-200/90 hover:border-blue-400 hover:shadow-2xs"
                     }`}
@@ -1029,16 +1033,8 @@ export default function POSBillingView() {
                           (e.target as HTMLImageElement).src = "/logo.png";
                         }}
                       />
-                      {isOutOfStock && (
-                        <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center">
-                          <span className="px-2 py-0.5 bg-red-600 text-white font-bold text-[10px] rounded-[3px]">
-                            Out of Stock
-                          </span>
-                        </div>
-                      )}
-
                       {/* Multi-variant indicator badge on image */}
-                      {hasVariants && !isOutOfStock && (
+                      {hasVariants && (
                         <div className="absolute bottom-1.5 left-1.5 bg-purple-600/95 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-[3px] shadow-xs flex items-center gap-1">
                           <Layers className="w-2.5 h-2.5" />
                           <span>{product.variants!.length} Options</span>
@@ -1064,16 +1060,8 @@ export default function POSBillingView() {
                     {/* Category tag & Branch Stock info */}
                     <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-100 pt-2">
                       <span className="truncate max-w-[90px] font-medium">{product.category}</span>
-                      <span
-                        className={
-                          isOutOfStock
-                            ? "text-red-600 font-extrabold"
-                            : isLowStock
-                            ? "text-amber-600 font-bold"
-                            : "text-slate-700 font-semibold"
-                        }
-                      >
-                        {isOutOfStock ? "Out of Stock" : `Stock: ${formatKgStock(branchStock)}`}
+                      <span className="text-slate-600 font-medium">
+                        {branchStock > 0 ? `Stock: ${formatKgStock(branchStock)}` : "Available"}
                       </span>
                     </div>
                   </div>
@@ -1086,7 +1074,6 @@ export default function POSBillingView() {
                 const inCartTotalQty = cartProductQuantities.get(product.id) || 0;
                 const isSelectedInCart = inCartTotalQty > 0;
                 const branchStock = getProductStockForSelectedBranch(product.id, product.stock);
-                const isOutOfStock = branchStock <= 0;
                 const isLowStock = branchStock > 0 && branchStock <= (product.bufferStock || 5);
                 const hasVariants = product.hasVariations && product.variants && product.variants.length > 0;
                 const minPrice = hasVariants ? Math.min(...product.variants!.map((v) => v.price)) : product.price;
@@ -1096,9 +1083,7 @@ export default function POSBillingView() {
                     key={product.id}
                     onClick={() => addToCart(product)}
                     className={`flex items-center justify-between p-3 bg-white rounded-[6px] border transition-all cursor-pointer ${
-                      isOutOfStock
-                        ? "border-slate-200 bg-slate-50/60 opacity-75"
-                        : isSelectedInCart
+                      isSelectedInCart
                         ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/10"
                         : "border-slate-200 hover:border-blue-400 hover:shadow-2xs"
                     }`}
@@ -1128,16 +1113,8 @@ export default function POSBillingView() {
                           <span>•</span>
                           <span className="font-mono">{product.barcode || "No Barcode"}</span>
                           <span>•</span>
-                          <span
-                            className={
-                              isOutOfStock
-                                ? "text-red-600 font-extrabold"
-                                : isLowStock
-                                ? "text-amber-600 font-bold"
-                                : "text-slate-600 font-semibold"
-                            }
-                          >
-                            {isOutOfStock ? "Out of Stock" : `Stock: ${formatKgStock(branchStock)}`}
+                          <span className="text-slate-600 font-medium">
+                            {branchStock > 0 ? `Stock: ${formatKgStock(branchStock)}` : "Available"}
                           </span>
                         </div>
                       </div>
@@ -1148,20 +1125,15 @@ export default function POSBillingView() {
                       </span>
                       <button
                         type="button"
-                        disabled={isOutOfStock}
                         className={`h-[32px] px-3 text-xs font-bold rounded-[5px] transition-colors ${
-                          isOutOfStock
-                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                            : isSelectedInCart
+                          isSelectedInCart
                             ? "bg-blue-600 text-white"
                             : hasVariants
                             ? "bg-purple-50 text-purple-700 hover:bg-purple-600 hover:text-white"
                             : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                         }`}
                       >
-                        {isOutOfStock
-                          ? "Unavailable"
-                          : isSelectedInCart
+                        {isSelectedInCart
                           ? `In Cart (${inCartTotalQty})`
                           : hasVariants
                           ? "Select Option"
@@ -1470,15 +1442,56 @@ export default function POSBillingView() {
             <span className="font-semibold text-red-600">- ₹ {discountAmount.toFixed(2)}</span>
           </div>
 
-          {isGstEnabled && (
-            <div className="flex items-center justify-between text-slate-600">
-              <span className="flex items-center gap-1">
-                <span>GST Tax</span>
-                <span className="text-[10px] text-slate-400">({totalGstRate}%)</span>
-              </span>
-              <span className="font-semibold text-slate-700">₹ {gstTax.toFixed(2)}</span>
+          {/* Include GST Toggle */}
+          <div className="flex items-center justify-between py-1.5 px-2 bg-white rounded-[6px] border border-slate-200 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIncludeGst((prev) => !prev)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  includeGst ? "bg-emerald-600" : "bg-slate-300"
+                }`}
+                role="switch"
+                aria-checked={includeGst}
+                title={includeGst ? "Click to disable GST" : "Click to enable GST"}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                    includeGst ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              <div className="flex flex-col">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                  <span>Include GST</span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                      includeGst
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-slate-100 text-slate-500 border border-slate-200"
+                    }`}
+                  >
+                    {includeGst ? `(${totalGstRate}%) Enabled` : "Disabled"}
+                  </span>
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {includeGst
+                    ? `CGST (${cgstPercent}%) + SGST (${sgstPercent}%)`
+                    : "No GST added to this bill"}
+                </span>
+              </div>
             </div>
-          )}
+
+            <div className="text-right">
+              <span
+                className={`font-bold font-mono text-xs ${
+                  includeGst ? "text-slate-800" : "text-slate-400 line-through"
+                }`}
+              >
+                {includeGst ? `+ ₹ ${gstTax.toFixed(2)}` : "₹ 0.00"}
+              </span>
+            </div>
+          </div>
 
           <div className="border-t border-slate-200 pt-2 flex items-center justify-between text-slate-900">
             <span className="text-sm font-bold">Total Payable</span>
@@ -2379,12 +2392,48 @@ export default function POSBillingView() {
                     <span className="font-semibold">- ₹ {discountAmount.toFixed(2)}</span>
                   </div>
                 )}
-                {isGstEnabled && (
-                  <div className="flex justify-between text-slate-600">
-                    <span>GST ({totalGstRate}%)</span>
-                    <span className="font-semibold">₹ {gstTax.toFixed(2)}</span>
+                {/* Mobile Include GST Toggle */}
+                <div className="flex items-center justify-between py-1.5 px-2 bg-white rounded-[6px] border border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIncludeGst((prev) => !prev)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        includeGst ? "bg-emerald-600" : "bg-slate-300"
+                      }`}
+                      role="switch"
+                      aria-checked={includeGst}
+                      title={includeGst ? "Click to disable GST" : "Click to enable GST"}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          includeGst ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                    <div>
+                      <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                        Include GST
+                        <span
+                          className={`text-[9px] px-1 py-0.2 rounded font-bold ${
+                            includeGst
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-slate-100 text-slate-500 border border-slate-200"
+                          }`}
+                        >
+                          {includeGst ? `${totalGstRate}%` : "Off"}
+                        </span>
+                      </span>
+                    </div>
                   </div>
-                )}
+                  <span
+                    className={`font-bold font-mono text-xs ${
+                      includeGst ? "text-slate-800" : "text-slate-400 line-through"
+                    }`}
+                  >
+                    {includeGst ? `+ ₹ ${gstTax.toFixed(2)}` : "₹ 0.00"}
+                  </span>
+                </div>
                 <div className="border-t border-slate-200 pt-1 flex justify-between text-sm font-extrabold text-slate-900">
                   <span>Payable</span>
                   <span className="text-blue-600 font-mono">₹ {totalPayable.toFixed(2)}</span>
@@ -2665,7 +2714,7 @@ export default function POSBillingView() {
                     Ph: {printer.settings.storePhone}
                   </p>
                 )}
-                {printer.settings.enableGst && printer.settings.storeGst && (
+                {completedInvoice.taxAmount > 0 && printer.settings.storeGst && (
                   <p className="text-[11px] text-slate-700 font-bold font-mono">
                     GSTIN: {printer.settings.storeGst}
                   </p>
@@ -2727,7 +2776,7 @@ export default function POSBillingView() {
                   </div>
                 )}
 
-                {isGstEnabled && completedInvoice.taxAmount > 0 && (
+                {completedInvoice.taxAmount > 0 && (
                   <>
                     <div className="flex justify-between text-slate-600">
                       <span>CGST ({completedInvoice.cgstPercent || (completedInvoice.taxPercent ? completedInvoice.taxPercent / 2 : 2.5)}%)</span>
